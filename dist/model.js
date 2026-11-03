@@ -86,14 +86,6 @@ export function autoPlace(assets, zones) {
   return result;
 }
 
-export function canAssignRack(assets, assetId, cabinetId, rackUnit, rackHeight) {
-  const asset = assets.find(item => item.id === assetId);
-  if (!asset || asset.type === 'cabinet' || !Number.isSafeInteger(rackHeight) || rackHeight < 1) return false;
-  if (!cabinetId) return rackUnit == null;
-  const cabinet = assets.find(item => item.id === cabinetId && item.type === 'cabinet');
-  return !!cabinet && Number.isSafeInteger(rackUnit) && rackUnit >= 1 && rackUnit + rackHeight - 1 <= (cabinet.capacity ?? 42) && !assets.some(other => other.id !== assetId && other.cabinetId === cabinetId && rackUnit < other.rackUnit + (other.rackHeight ?? 1) && other.rackUnit < rackUnit + rackHeight);
-}
-
 export function restoreProject(input) {
   const invalid = () => { throw new Error('Invalid project file.'); };
   if (!input || typeof input.name !== 'string' || !Array.isArray(input.zones) || !Array.isArray(input.assets) || !Array.isArray(input.cables)) invalid();
@@ -107,33 +99,11 @@ export function restoreProject(input) {
   const assets = input.assets.map(asset => {
     if (!asset || typeof asset.id !== 'string' || !asset.id || ids.has(asset.id) || typeof asset.name !== 'string' || !TYPES.includes(asset.type) || (asset.placed && (!Number.isFinite(asset.x) || !Number.isFinite(asset.y) || asset.x < 0 || asset.y < 0 || asset.x > 100 || asset.y > 100))) invalid();
     ids.add(asset.id);
-    const capacity = asset.capacity ?? 42, rackHeight = asset.rackHeight ?? 1;
-    const cabinetId = asset.cabinetId ?? '', rackUnit = asset.rackUnit ?? null;
-    if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1000 || !Number.isSafeInteger(rackHeight) || rackHeight < 1 || typeof cabinetId !== 'string' || (cabinetId ? !Number.isSafeInteger(rackUnit) || rackUnit < 1 : rackUnit !== null)) invalid();
-    const portIds = new Set();
-    if (asset.ports !== undefined && !Array.isArray(asset.ports)) invalid();
-    const ports = (asset.ports ?? []).map(port => {
-      if (!port || typeof port.id !== 'string' || !port.id || portIds.has(port.id) || typeof port.label !== 'string' || !port.label.trim()) invalid();
-      portIds.add(port.id);
-      return { id: port.id, label: port.label };
-    });
-    return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null, capacity, rackHeight, cabinetId, rackUnit, ports };
+    return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null };
   });
-  for (const asset of assets.filter(asset => asset.cabinetId)) {
-    if (!canAssignRack(assets, asset.id, asset.cabinetId, asset.rackUnit, asset.rackHeight)) invalid();
-  }
-  const cableIds = new Set();
   const cables = input.cables.map(cable => {
-    if (!cable || typeof cable.id !== 'string' || !cable.id || cableIds.has(cable.id) || !ids.has(cable.from) || !ids.has(cable.to) || cable.from === cable.to) invalid();
-    cableIds.add(cable.id);
-    const fromPort = cable.fromPort ?? '', toPort = cable.toPort ?? '';
-    if (typeof fromPort !== 'string' || typeof toPort !== 'string' || (fromPort && !assets.find(asset => asset.id === cable.from).ports.some(port => port.id === fromPort)) || (toPort && !assets.find(asset => asset.id === cable.to).ports.some(port => port.id === toPort))) invalid();
-    if (cable.waypoints !== undefined && !Array.isArray(cable.waypoints)) invalid();
-    const waypoints = (cable.waypoints ?? []).map(point => {
-      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.x > 100 || point.y < 0 || point.y > 100) invalid();
-      return { x: point.x, y: point.y };
-    });
-    return { id: cable.id, from: cable.from, to: cable.to, fromPort, toPort, waypoints };
+    if (!cable || typeof cable.id !== 'string' || !ids.has(cable.from) || !ids.has(cable.to) || cable.from === cable.to) invalid();
+    return { id: cable.id, from: cable.from, to: cable.to };
   });
   const planImage = typeof input.planImage === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(input.planImage) ? input.planImage : '';
   return { name: input.name, floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets, cables };
