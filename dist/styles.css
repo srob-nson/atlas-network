@@ -54,6 +54,6 @@
 .rack-switch .rack-port { border-color: #a5aaa6; background: linear-gradient(#464b48, #1e2421); }
 .rack-firewall .panel-ports, .rack-router .panel-ports { grid-template-columns: repeat(12, minmax(30px, 1fr)); }
 .rack-firewall .rack-port { border-radius: 1px 1px 5px 5px; border-color: #b0a589; background: #35352f; }
-.rack-port.connected { box-shadow: inset 0 3px #76c781; }
+.rack-panel .rack-port.connected { background: var(--port-color); color: var(--port-ink); box-shadow: none; }
 .rack-port.armed { outline: 3px solid #d28a21; outline-offset: 1px; background: #b46f14; }
 @media(max-width: 700px) { .panel-ports { grid-template-columns: repeat(12, minmax(20px, 1fr)); } .rack-firewall .panel-ports, .rack-router .panel-ports { grid-template-columns: repeat(8, minmax(24px, 1fr)); } }
