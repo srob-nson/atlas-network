@@ -287,7 +287,6 @@ document.addEventListener('click', event => {
   switch (action) {
     case 'project-menu': $('#project-menu').hidden = !$('#project-menu').hidden; break;
     case 'focus-canvas': $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
-    case 'focus-zones': $('.zones-title').scrollIntoView({ behavior: 'smooth', block: 'center' }); break;
     case 'inventory': closeDialogs(); $('#inventory-dialog').showModal(); break;
     case 'show-connections': showConnections(); break;
     case 'close-dialog': closeDialogs(); break;
