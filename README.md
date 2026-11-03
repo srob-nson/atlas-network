@@ -19,3 +19,9 @@ Projects and floor-plan images are stored in the current browser. Clearing site 
 Use the wheel over the floor plan to zoom around the pointer, or pinch on a touch screen. Drag empty plan space to pan; Reset view restores the original position, zoom and rotation.
 
 Select a cable on the plan or in Connections to edit its route. Click a segment to add a grid point, then drag points to move them. Select a point to remove it, or reset the route to automatic. The Add point control also creates a keyboard-focusable point: use arrow keys to move it and Delete or Backspace to remove it. Escape cancels an active drag. Cable points remain fixed when equipment moves and are saved with the project.
+
+### Racks and port connections
+
+Open **Racks** in the sidebar or select a cabinet on the floor plan. Rack-mountable devices are automatically assigned to the first cabinet in their zone; use the cabinet field in equipment details to change the assignment. Access points stay outside racks. Rack panels are illustrative and do not represent a specific model or rack-unit layout.
+
+Select a device panel to add or edit connections by port name, label and colour. Named ports can have one connection each. Connections appear in the project connection list and on the floor plan when both endpoints are placed; labels and colours are saved in project exports.

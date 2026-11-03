@@ -69,3 +69,17 @@ test('routes connect fixed points with orthogonal elbows', async () => {
     [12, 18], [30, 18], [30, 40], [60, 40], [83, 40], [83, 72]
   ]);
 });
+
+test('rack assignments and connection details survive project restore', async () => {
+  const { assignRacks } = await import('../dist/model.js');
+  const assets = assignRacks([
+    { id: 'r', name: 'Rack', type: 'cabinet', zoneId: 'z' },
+    { id: 's', name: 'Switch', type: 'switch', zoneId: 'z' },
+    { id: 'a', name: 'AP', type: 'access_point', zoneId: 'z' }
+  ]);
+  assert.equal(assets[1].rackId, 'r');
+  assert.equal(assets[2].rackId, '');
+  const project = restoreProject({ name: 'Rack', zones: [{ id: 'z', name: 'Room', x: 0, y: 0, w: 100, h: 100 }], assets, cables: [{ id: 'c', from: 's', to: 'a', fromPort: '1', toPort: 'WAN', label: 'Uplink', color: '#123456' }] });
+  assert.equal(project.assets[1].rackId, 'r');
+  assert.deepEqual([project.cables[0].fromPort, project.cables[0].toPort, project.cables[0].label, project.cables[0].color], ['1', 'WAN', 'Uplink', '#123456']);
+});

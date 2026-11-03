@@ -60,6 +60,15 @@ export function parseInventory(text, zones) {
   return { assets, errors };
 }
 
+export function assignRacks(assets) {
+  return assets.map(asset => {
+    if (asset.type === 'cabinet' || asset.type === 'access_point') return { ...asset, rackId: '' };
+    if (asset.rackId !== undefined) return { ...asset };
+    const rack = assets.find(a => a.type === 'cabinet' && a.zoneId && a.zoneId === asset.zoneId);
+    return { ...asset, rackId: rack?.id || '' };
+  });
+}
+
 export function autoPlace(assets, zones) {
   const result = assets.map(asset => ({ ...asset }));
   for (const zone of zones) {
@@ -101,14 +110,19 @@ export function restoreProject(input) {
     ids.add(asset.id);
     return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null };
   });
+  for (const asset of assets) {
+    const original = input.assets.find(a => a.id === asset.id);
+    if (original.rackId !== undefined) asset.rackId = assets.some(a => a.id === original.rackId && a.type === 'cabinet' && a.id !== asset.id) ? original.rackId : '';
+  }
+  const assignedAssets = assignRacks(assets);
   const cables = input.cables.map(cable => {
     if (!cable || typeof cable.id !== 'string' || !ids.has(cable.from) || !ids.has(cable.to) || cable.from === cable.to) invalid();
     const waypoints = cable.waypoints === undefined ? [] : cable.waypoints;
     if (!Array.isArray(waypoints) || !waypoints.every(p => p && ['x', 'y'].every(k => Number.isFinite(p[k]) && p[k] >= 0 && p[k] <= 100 && p[k] % 5 === 0))) invalid();
-    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })) };
+    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667' };
   });
   const planImage = typeof input.planImage === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(input.planImage) ? input.planImage : '';
-  return { name: input.name, floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets, cables };
+  return { name: input.name, floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets: assignedAssets, cables };
 }
 
 export function cableRoute(from, waypoints, to) {
