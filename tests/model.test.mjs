@@ -98,3 +98,14 @@ test('ports default by device type and survive restoration with legacy connectio
   assert.ok(project.assets[1].ports.some(port => port.name === 'WAN'));
   assert.deepEqual(restoreProject(project).assets[0].ports, project.assets[0].ports);
 });
+
+test('rack connections require different devices and free existing ports', async () => {
+  const { canConnectPorts } = await import('../dist/model.js');
+  const assets = [{ id: 'a', rackId: 'r', ports: [{ name: '1' }, { name: '2' }] }, { id: 'b', rackId: 'r', ports: [{ name: '1' }] }, { id: 'c', rackId: 'other', ports: [{ name: '1' }] }];
+  const cables = [{ from: 'a', fromPort: '1', to: 'b', toPort: '1' }];
+  assert.equal(canConnectPorts(assets, [], 'r', 'a', '2', 'b', '1'), true);
+  assert.equal(canConnectPorts(assets, cables, 'r', 'a', '2', 'b', '1'), false);
+  assert.equal(canConnectPorts(assets, [], 'r', 'a', '2', 'a', '1'), false);
+  assert.equal(canConnectPorts(assets, [], 'r', 'a', '2', 'c', '1'), false);
+  assert.equal(canConnectPorts(assets, [], 'r', 'a', 'missing', 'b', '1'), false);
+});

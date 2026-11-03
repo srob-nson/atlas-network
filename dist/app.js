@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts } from './model.js?v=5';
+import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, canConnectPorts } from './model.js?v=6';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -35,7 +35,7 @@ let project;
 try { project = localStorage.getItem(storageKey) ? restoreProject(JSON.parse(localStorage.getItem(storageKey))) : structuredClone(demo); }
 catch { project = structuredClone(demo); }
 project.assets = initializePorts(assignRacks(project.assets), project.cables);
-let rackView = '', rackDevice = '';
+let rackView = '', rackDevice = '', pendingPort = null;
 let selected = { kind: null, id: null };
 let view = '3d', rotation = 0, zoom = 1, mode = 'select', zoneStart = null;
 let pan = { x: 0, y: 0 }, pointIndex = null;
@@ -205,7 +205,7 @@ function renderScene() {
   scene.innerHTML = out;
 }
 
-function closeDialogs() { document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
+function closeDialogs() { pendingPort = null; document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
 function showConnections() {
   $('#connection-list').innerHTML = project.cables.map(cable => `<div class="inventory-row"><span class="inventory-asset-icon">${icon('link')}</span><div><button class="cable-select" data-cable-select="${esc(cable.id)}"><strong>${esc(assetById(cable.from)?.name || 'Unknown')} → ${esc(assetById(cable.to)?.name || 'Unknown')}</strong><small>Edit cable route</small></button></div><button class="tool-button" data-remove-cable="${esc(cable.id)}" title="Remove cable" aria-label="Remove cable">${icon('trash')}</button></div>`).join('') || '<p class="detail-note">There are no cables in this project yet.</p>';
   closeDialogs(); $('#connections-dialog').showModal();
@@ -230,17 +230,18 @@ function drawRackCables() {
   }).join('');
 }
 function showRacks(id = '', deviceId = '', portName = '') {
+  if (rackView !== id) pendingPort = null;
   rackView = id; rackDevice = deviceId;
   initializePorts(project.assets, project.cables);
   const rack = assetById(id), device = assetById(deviceId);
   $('#rack-title').textContent = rack?.name || 'Racks';
-  $('#rack-description').textContent = rack ? 'Select a device or port to manage connections.' : 'Choose a rack to see its devices.';
+  $('#rack-description').textContent = rack ? 'Double-click two ports on different devices to connect them. Select a device to edit ports.' : 'Choose a rack to see its devices.';
   const content = $('#rack-content');
   if (!rack) {
     content.innerHTML = project.assets.filter(a => a.type === 'cabinet').map(a => `<button class="inventory-row" data-rack-open="${esc(a.id)}"><span class="inventory-asset-icon">${icon('layers')}</span><div><strong>${esc(a.name)}</strong><small>${esc(zoneFor(a)?.name || 'Unassigned')} · ${project.assets.filter(d => d.rackId === a.id).length} devices</small></div>${icon('chevron')}</button>`).join('') || '<p class="detail-note">Add a cabinet to get started.</p>';
   } else {
     const devices = project.assets.filter(a => a.rackId === rack.id);
-    content.innerHTML = `<button class="text-button" data-rack-open="">← All racks</button><div class="rack-frame"><svg id="rack-cables" aria-hidden="true"></svg>${devices.map(a => `<div class="rack-panel ${a.id === deviceId ? 'active' : ''}"><button class="rack-device-name" data-rack-device="${esc(a.id)}"><strong>${esc(a.name)}</strong><small>${esc(a.model || typeName(a.type))}</small></button><div class="panel-ports">${a.ports.map(p => `<button class="rack-port ${a.id === deviceId && p.name === portName ? 'active' : ''}" data-port-device="${esc(a.id)}" data-port-name="${esc(p.name)}" title="${esc(p.name)} · ${esc(p.speed)}" aria-label="${esc(a.name)}, port ${esc(p.name)}, ${esc(p.speed)}">${esc(p.name)}</button>`).join('')}</div></div>`).join('') || '<p class="detail-note">No devices assigned to this rack.</p>'}</div>${device ? `<div class="rack-controls"><h3>${esc(device.name)} · Port editor</h3><form id="device-port-form"><label class="field"><span>Port</span><select name="port">${portOptions(device, portName)}</select></label><label class="field"><span>Port speed</span><input name="speed" maxlength="80" value="${esc(device.ports.find(p => p.name === portName)?.speed || device.ports[0]?.speed || '')}" placeholder="e.g. 1 Gbps" required></label><button class="button secondary" type="submit">Save speed</button> <button class="button secondary" type="button" data-action="remove-port">Remove port</button></form><form id="add-port-form"><label class="field"><span>New port name</span><input name="name" maxlength="80" required></label><button class="button secondary" type="submit">Add port</button></form><h3>Connections</h3>${project.cables.filter(c => c.from === device.id || c.to === device.id).map(c => `<div class="port-connection"><span class="color-dot" style="background:${esc(c.color || '#d9a667')}"></span><span><strong>${esc(c.from === device.id ? c.fromPort || 'Port unspecified' : c.toPort || 'Port unspecified')}</strong> → ${esc(assetById(c.from === device.id ? c.to : c.from)?.name)} · ${esc(c.from === device.id ? c.toPort || 'Port unspecified' : c.fromPort || 'Port unspecified')}<small>${esc(c.label || 'Unlabelled')}</small></span><button data-edit-port="${esc(c.id)}" class="text-button">Edit</button></div>`).join('') || '<p class="detail-note">No connections yet.</p>'}<form id="port-form"><input type="hidden" name="cableId"><label class="field"><span>Device port</span><select name="fromPort" required><option value="">Choose port</option>${portOptions(device, portName)}</select></label><label class="field"><span>Connect to</span><select name="to" required><option value="">Choose equipment</option>${project.assets.filter(a => a.id !== device.id && a.type !== 'cabinet').map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label><label class="field"><span>Destination port</span><select name="toPort" required><option value="">Choose equipment first</option></select></label><label class="field"><span>Connection label</span><input name="label" maxlength="80" placeholder="e.g. Uplink"></label><label class="field"><span>Connection colour</span><input name="color" type="color" value="#d9a667"></label><button class="button primary" type="submit">Save connection</button></form></div>` : ''}`;
+    content.innerHTML = `<button class="text-button" data-rack-open="">← All racks</button><p class="rack-connect-hint" role="status">${pendingPort ? `Selected ${esc(assetById(pendingPort.device)?.name)} · ${esc(pendingPort.port)}. Double-click a destination port. <button class="text-button" data-action="cancel-port">Cancel</button>` : 'Double-click a port to start a connection. Keyboard: focus a port and press Enter.'}</p><div class="rack-frame"><svg id="rack-cables" aria-hidden="true"></svg>${devices.map(a => `<div class="rack-panel rack-${esc(a.type)} ${a.id === deviceId ? 'active' : ''}"><div class="rack-bezel"><span class="rack-brand">${a.type === 'switch' ? 'FORTISWITCH' : a.type === 'firewall' ? 'FORTIGATE' : esc(typeName(a.type).toUpperCase())}</span><span class="rack-leds" aria-hidden="true">● ● ●</span><button class="rack-device-name" data-rack-device="${esc(a.id)}"><strong>${esc(a.name)}</strong><small>${esc(a.model || typeName(a.type))}</small></button></div><div class="panel-ports">${a.ports.map(p => `<button class="rack-port ${pendingPort?.device === a.id && pendingPort.port === p.name ? 'armed' : ''} ${a.id === deviceId && p.name === portName ? 'active' : ''} ${project.cables.some(c => (c.from === a.id && c.fromPort === p.name) || (c.to === a.id && c.toPort === p.name)) ? 'connected' : ''}" data-port-device="${esc(a.id)}" data-port-name="${esc(p.name)}" title="${esc(p.name)} · ${esc(p.speed)}" aria-label="${esc(a.name)}, port ${esc(p.name)}, ${esc(p.speed)}">${esc(p.name)}</button>`).join('')}</div></div>`).join('') || '<p class="detail-note">No devices assigned to this rack.</p>'}</div>${device ? `<div class="rack-controls"><h3>${esc(device.name)} · Port editor</h3><form id="device-port-form"><label class="field"><span>Port</span><select name="port">${portOptions(device, portName)}</select></label><label class="field"><span>Port speed</span><input name="speed" maxlength="80" value="${esc(device.ports.find(p => p.name === portName)?.speed || device.ports[0]?.speed || '')}" placeholder="e.g. 1 Gbps" required></label><button class="button secondary" type="submit">Save speed</button> <button class="button secondary" type="button" data-action="remove-port">Remove port</button></form><form id="add-port-form"><label class="field"><span>New port name</span><input name="name" maxlength="80" required></label><button class="button secondary" type="submit">Add port</button></form><h3>Connections</h3>${project.cables.filter(c => c.from === device.id || c.to === device.id).map(c => `<div class="port-connection"><span class="color-dot" style="background:${esc(c.color || '#d9a667')}"></span><span><strong>${esc(c.from === device.id ? c.fromPort || 'Port unspecified' : c.toPort || 'Port unspecified')}</strong> → ${esc(assetById(c.from === device.id ? c.to : c.from)?.name)} · ${esc(c.from === device.id ? c.toPort || 'Port unspecified' : c.fromPort || 'Port unspecified')}<small>${esc(c.label || 'Unlabelled')}</small></span><button data-edit-port="${esc(c.id)}" class="text-button">Edit</button></div>`).join('') || '<p class="detail-note">No connections yet.</p>'}<form id="port-form"><input type="hidden" name="cableId"><label class="field"><span>Device port</span><select name="fromPort" required><option value="">Choose port</option>${portOptions(device, portName)}</select></label><label class="field"><span>Connect to</span><select name="to" required><option value="">Choose equipment</option>${project.assets.filter(a => a.id !== device.id && a.type !== 'cabinet').map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label><label class="field"><span>Destination port</span><select name="toPort" required><option value="">Choose equipment first</option></select></label><label class="field"><span>Connection label</span><input name="label" maxlength="80" placeholder="e.g. Uplink"></label><label class="field"><span>Connection colour</span><input name="color" type="color" value="#d9a667"></label><button class="button primary" type="submit">Save connection</button></form></div>` : ''}`;
   }
   if (!$('#rack-dialog').open) { closeDialogs(); $('#rack-dialog').showModal(); }
   requestAnimationFrame(drawRackCables);
@@ -390,11 +391,26 @@ $('#scene').addEventListener('keydown', event => {
   if ((event.key === 'Enter' || event.key === ' ') && event.target.closest('[data-asset], [data-cable]')) { event.preventDefault(); event.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
 });
 
+function selectRackPort(button) {
+  const device = button.dataset.portDevice, port = button.dataset.portName;
+  const occupied = project.cables.some(c => (c.from === device && c.fromPort?.toLowerCase() === port.toLowerCase()) || (c.to === device && c.toPort?.toLowerCase() === port.toLowerCase()));
+  if (occupied) { toast('This port already has a connection.'); return; }
+  if (!pendingPort) { pendingPort = { device, port }; showRacks(rackView, device, port); return; }
+  if (pendingPort.device === device && pendingPort.port === port) { pendingPort = null; showRacks(rackView, device, port); return; }
+  if (!canConnectPorts(project.assets, project.cables, rackView, pendingPort.device, pendingPort.port, device, port)) { toast('Choose a free port on a different device in this rack.'); return; }
+  project.cables.push({ id: uid(), from: pendingPort.device, fromPort: pendingPort.port, to: device, toPort: port, waypoints: [], label: '', color: '#d9a667' });
+  pendingPort = null; save(); render(); showRacks(rackView, device, port); toast('Ports connected.');
+}
+document.addEventListener('dblclick', event => {
+  const port = event.target.closest('[data-port-device]');
+  if (port) { event.preventDefault(); selectRackPort(port); }
+});
+
 document.addEventListener('click', event => {
   const rackButton = event.target.closest('[data-rack-open]');
   if (rackButton) { showRacks(rackButton.dataset.rackOpen); return; }
   const portButton = event.target.closest('[data-port-device]');
-  if (portButton) { showRacks(rackView, portButton.dataset.portDevice, portButton.dataset.portName); return; }
+  if (portButton) { if (event.detail === 0) selectRackPort(portButton); return; }
   const rackDeviceButton = event.target.closest('[data-rack-device]');
   if (rackDeviceButton) { showRacks(rackView, rackDeviceButton.dataset.rackDevice); return; }
   const editPort = event.target.closest('[data-edit-port]');
@@ -423,6 +439,7 @@ document.addEventListener('click', event => {
     case 'project-menu': $('#project-menu').hidden = !$('#project-menu').hidden; break;
     case 'focus-canvas': $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
     case 'inventory': closeDialogs(); $('#inventory-dialog').showModal(); break;
+    case 'cancel-port': pendingPort = null; showRacks(rackView, rackDevice); break;
     case 'remove-port': {
       const device = assetById(rackDevice), name = $('#device-port-form').elements.port.value;
       if (project.cables.some(c => (c.from === device.id && c.fromPort === name) || (c.to === device.id && c.toPort === name))) { toast('Remove or edit the connection before removing this port.'); break; }
@@ -588,3 +605,5 @@ document.addEventListener('keydown', event => {
 render();
 
 window.addEventListener('resize', drawRackCables);
+
+$('#rack-dialog').addEventListener('close', () => { pendingPort = null; });

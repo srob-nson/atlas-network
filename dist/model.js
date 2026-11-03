@@ -85,6 +85,12 @@ export function initializePorts(assets, cables) {
   return assets;
 }
 
+export function canConnectPorts(assets, cables, rackId, from, fromPort, to, toPort) {
+  const a = assets.find(asset => asset.id === from), b = assets.find(asset => asset.id === to);
+  const free = (id, name) => !cables.some(c => (c.from === id && c.fromPort?.toLowerCase() === name.toLowerCase()) || (c.to === id && c.toPort?.toLowerCase() === name.toLowerCase()));
+  return !!(a && b && from !== to && a.rackId === rackId && b.rackId === rackId && a.ports.some(p => p.name === fromPort) && b.ports.some(p => p.name === toPort) && free(from, fromPort) && free(to, toPort));
+}
+
 export function autoPlace(assets, zones) {
   const result = assets.map(asset => ({ ...asset }));
   for (const zone of zones) {
