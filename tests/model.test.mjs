@@ -109,3 +109,21 @@ test('rack connections require different devices and free existing ports', async
   assert.equal(canConnectPorts(assets, [], 'r', 'a', '2', 'c', '1'), false);
   assert.equal(canConnectPorts(assets, [], 'r', 'a', 'missing', 'b', '1'), false);
 });
+
+test('floor auto-placement does not require zones or move existing equipment', async () => {
+  const { autoPlaceFloor } = await import('../dist/model.js');
+  const assets = [{ id: 'a', placed: true, x: 15, y: 20, zoneId: 'old' }, { id: 'b', placed: false, zoneId: '' }, { id: 'c', placed: false, rackId: 'r' }];
+  const result = autoPlaceFloor(assets);
+  assert.deepEqual(result[0], assets[0]);
+  assert.equal(result[1].placed, true);
+  assert.equal(result[1].zoneId, '');
+  assert.equal(result[2].placed, false);
+});
+
+test('rack assignment works without zones when there is a single cabinet', async () => {
+  const { assignRacks } = await import('../dist/model.js');
+  const assets = [{ id: 'r', type: 'cabinet' }, { id: 's', type: 'switch' }, { id: 'a', type: 'access_point' }];
+  assert.equal(assignRacks(assets)[1].rackId, 'r');
+  assert.equal(assignRacks([...assets, { id: 'r2', type: 'cabinet' }])[1].rackId, '');
+  assert.equal(assignRacks([{ ...assets[1], rackId: '' }, assets[0]])[0].rackId, '');
+});

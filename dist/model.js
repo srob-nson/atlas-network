@@ -37,7 +37,7 @@ function csvRows(text) {
   return rows;
 }
 
-export function parseInventory(text, zones) {
+export function parseInventory(text, zones, reportZones = true) {
   const rows = csvRows(text);
   const headers = (rows.shift() || []).map(value => value.toLowerCase().replace(/[\s-]+/g, '_'));
   if (!headers.includes('name') || !headers.includes('type')) throw new Error('CSV needs name and type columns.');
@@ -53,7 +53,7 @@ export function parseInventory(text, zones) {
     }
     const zone = zones.find(z => z.name.toLowerCase() === (row.zone || '').toLowerCase());
     const link = row.management_url || row.url || '';
-    if (row.zone && !zone) errors.push(`Row ${index + 2}: zone “${row.zone}” was not found; assign it after import.`);
+    if (reportZones && row.zone && !zone) errors.push(`Row ${index + 2}: zone “${row.zone}” was not found; assign it after import.`);
     if (link && !safeManagementUrl(link)) errors.push(`Row ${index + 2}: invalid management URL was omitted.`);
     assets.push({ id: crypto.randomUUID(), name: row.name, type, zoneId: zone?.id || '', ip: row.ip || '', managementUrl: safeManagementUrl(link), model: row.model || '', placed: false });
   });
@@ -64,7 +64,8 @@ export function assignRacks(assets) {
   return assets.map(asset => {
     if (asset.type === 'cabinet' || asset.type === 'access_point') return { ...asset, rackId: '' };
     if (asset.rackId !== undefined) return { ...asset };
-    const rack = assets.find(a => a.type === 'cabinet' && a.zoneId && a.zoneId === asset.zoneId);
+    const cabinets = assets.filter(a => a.type === 'cabinet');
+    const rack = cabinets.find(a => a.zoneId && a.zoneId === asset.zoneId) || (cabinets.length === 1 ? cabinets[0] : null);
     return { ...asset, rackId: rack?.id || '' };
   });
 }
@@ -115,6 +116,16 @@ export function autoPlace(assets, zones) {
     }
   }
   return result;
+}
+
+export function autoPlaceFloor(assets) {
+  const visible = assets.filter(asset => !asset.rackId);
+  const placed = autoPlace(visible.map(asset => ({ ...asset, zoneId: 'floor' })), [{ id: 'floor', x: 0, y: 0, w: 100, h: 100 }]);
+  const byId = new Map(placed.map(asset => [asset.id, asset]));
+  return assets.map(asset => {
+    const next = byId.get(asset.id);
+    return next && !asset.placed && next.placed ? { ...asset, x: next.x, y: next.y, placed: true } : { ...asset };
+  });
 }
 
 export function restoreProject(input) {

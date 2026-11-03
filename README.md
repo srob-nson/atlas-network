@@ -7,12 +7,11 @@ Run locally with `python3 -m http.server 8000 --directory dist`, then open `http
 ## Start a design
 
 1. Use **Export → Start a blank project**, then upload a PNG, JPEG, or WebP floor plan (up to 2 MB).
-2. Add zones by choosing two corners on the plan, then name or adjust each zone in the inspector.
-3. Add equipment or import a CSV. The required columns are `name,type`; optional columns are `zone,ip,management_url,model`. Supported types are `cabinet`, `switch`, `router`, `firewall`, `access_point`, and `patch_panel`. A zone name must match an existing zone to be assigned automatically.
-4. Select an item to open its details, or drag it directly on the floor plan. Dragging updates its zone and connected cable lines. Use the details overlay to edit it, place it manually, open its HTTP(S) management interface, or connect it to another placed item. Auto-placement arranges unplaced items inside their assigned zones and leaves already placed items where they are.
-5. Export the current view as SVG for documentation, or export the project as JSON to back it up or move it to another browser. Import a JSON export from the same menu to restore it.
+2. Add equipment or import a CSV. The required columns are `name,type`; optional columns are `ip,management_url,model`. Supported types are `cabinet`, `switch`, `router`, `firewall`, `access_point`, and `patch_panel`.
+3. Select an item to open its details, or drag it directly on the floor plan. Use the details overlay to edit it, place it manually, open its HTTP(S) management interface, or connect it to another placed item. Auto-placement arranges unplaced floor equipment and leaves already placed equipment where it is.
+4. Export the current view as SVG for documentation, or export the project as JSON to back it up or move it to another browser. Import a JSON export from the same menu to restore it.
 
-Projects and floor-plan images are stored in the current browser. Clearing site data can remove them; export a JSON backup. The isometric view and cable paths are illustrative, not measured or engineered: zones, routes, physical clearance, rack capacity, and equipment suitability need review. This first version covers networking equipment; endpoints and OT assets are not included.
+Projects and floor-plan images are stored in the current browser. Clearing site data can remove them; export a JSON backup. The isometric view and cable paths are illustrative, not measured or engineered: routes, physical clearance, rack capacity, and equipment suitability need review. This first version covers networking equipment; endpoints and OT assets are not included.
 
 ### Navigating and routing cables
 
@@ -22,6 +21,6 @@ Select a cable on the plan or in Connections to edit its route. Click a segment 
 
 ### Racks and port connections
 
-Open **Racks** in the sidebar or select a cabinet on the floor plan. Rack-mountable devices are automatically assigned to the first cabinet in their zone; use the cabinet field in equipment details to change the assignment. Access points stay outside racks. Racked devices are hidden on the floor plan; cables to other locations terminate at the cabinet. Rack panels are illustrative and do not represent a specific model or rack-unit layout.
+Open **Racks** in the sidebar or select a cabinet on the floor plan. Rack-mountable devices are automatically assigned when there is one cabinet; use the cabinet field in equipment details to change the assignment. Access points stay outside racks. Racked devices are hidden on the floor plan; cables to other locations terminate at the cabinet. Rack panels are illustrative and do not represent a specific model or rack-unit layout.
 
 Double-click a free port, then choose a device and port from **Connect to**; the connection saves immediately. Choose a colour before connecting, or select a connected port to change its colour. Alternatively, double-click a second free port in the rack. Double-click either connected port to remove the connection. Keyboard users can focus a port and press Enter. Switches and patch panels start with 48 ports; routers and firewalls start with four. Connections within a rack are drawn between ports. The switch and firewall panel styling is FortiSwitch- and FortiGate-inspired, not a model-specific hardware layout.
