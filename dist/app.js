@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject } from './model.js';
+import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset } from './model.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -34,8 +34,9 @@ const demo = {
 let project;
 try { project = localStorage.getItem(storageKey) ? restoreProject(JSON.parse(localStorage.getItem(storageKey))) : structuredClone(demo); }
 catch { project = structuredClone(demo); }
-let selected = { kind: 'asset', id: project.assets.find(a => a.id === 'core')?.id || project.assets[0]?.id };
+let selected = { kind: null, id: null };
 let view = '3d', rotation = 0, zoom = 1, mode = 'select', zoneStart = null;
+let drag = null, ignoreSceneClick = false, inspectorOpen = false;
 let toastTimer;
 
 function toast(message, duration = 3500) {
@@ -54,7 +55,7 @@ function zoneOptions(id) { return `<option value="">Unassigned</option>${project
 function typeOptions(type) { return TYPES.map(value => `<option value="${value}" ${value === type ? 'selected' : ''}>${typeName(value)}</option>`).join(''); }
 function setMode(next, message) {
   mode = next; zoneStart = null;
-  $('#hint-text').textContent = message || 'Select equipment to see its details';
+  $('#hint-text').textContent = message || 'Select or drag equipment';
   $('#cancel-mode').hidden = next === 'select';
   $('#scene').style.cursor = next === 'select' ? 'default' : 'crosshair';
 }
@@ -77,6 +78,7 @@ function render() {
 
 function renderInspector() {
   const target = $('#inspector-content'), asset = selectedAsset(), zone = currentZone();
+  $('.inspector').hidden = !inspectorOpen || (!asset && !zone);
   if (asset) {
     const url = safeManagementUrl(asset.managementUrl);
     target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.placed ? 'Placed on plan' : 'Ready to place'}</span><span class="badge gray">${esc(zoneFor(asset)?.name || 'Unassigned')}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label><label class="field"><span>Floor zone</span><select name="zoneId">${zoneOptions(asset.zoneId)}</select></label><label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label><label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label></form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions"><button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button><button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
@@ -149,8 +151,8 @@ function assetShape(asset) {
 }
 function renderScene() {
   const scene = $('#scene');
-  const width = 1000 / zoom, height = 600 / zoom;
-  scene.setAttribute('viewBox', `${500-width/2} ${300-height/2} ${width} ${height}`);
+  const width = 900 / zoom, height = 500 / zoom;
+  scene.setAttribute('viewBox', `${500-width/2} ${285-height/2} ${width} ${height}`);
   const floor = [[0,0],[100,0],[100,100],[0,100]];
   const p00 = point(0,0), p10 = point(100,0), p01 = point(0,100);
   const matrix = `${round((p10[0]-p00[0])/100)} ${round((p10[1]-p00[1])/100)} ${round((p01[0]-p00[0])/100)} ${round((p01[1]-p00[1])/100)} ${round(p00[0])} ${round(p00[1])}`;
@@ -175,7 +177,7 @@ function renderScene() {
     const a = assetById(cable.from), b = assetById(cable.to);
     if (!a?.placed || !b?.placed) continue;
     const path = [[a.x,a.y],[b.x,a.y],[b.x,b.y]].map(p => point(...p).map(round).join(',')).join(' ');
-    out += `<polyline points="${path}" fill="none" stroke="#fff8e8" stroke-width="5" stroke-linejoin="round" opacity=".8"/><polyline points="${path}" fill="none" stroke="#d9a667" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>`;
+    out += `<polyline points="${path}" fill="none" stroke="#fff8e8" stroke-width="5" stroke-linejoin="round" opacity=".8"/><polyline data-cable="${esc(cable.id)}" points="${path}" fill="none" stroke="#d9a667" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>`;
   }
   out += project.assets.filter(a => a.placed).sort((a,b) => { const [ax,ay] = rotated(a.x,a.y), [bx,by] = rotated(b.x,b.y); return ax+ay-bx-by; }).map(assetShape).join('');
   scene.innerHTML = out;
@@ -187,8 +189,7 @@ function showConnections() {
   closeDialogs(); $('#connections-dialog').showModal();
 }
 function chooseAsset(id) {
-  selected = { kind: 'asset', id }; setMode('select'); closeDialogs(); render();
-  if (window.innerWidth <= 1050) $('.inspector').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  selected = { kind: 'asset', id }; inspectorOpen = true; setMode('select'); closeDialogs(); render();
 }
 function download(name, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
@@ -196,31 +197,34 @@ function download(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function projectFilename() { return project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'network-atlas'; }
-function worldAt(event) {
+function worldFromEvent(event) {
   const svg = $('#scene'), pt = svg.createSVGPoint(); pt.x = event.clientX; pt.y = event.clientY;
   const p = pt.matrixTransform(svg.getScreenCTM().inverse());
   let x, y;
   if (view === '3d') { const a = (p.x - 500) / 3.25, b = (p.y - 138) / 1.48; x = (a + b) / 2; y = (b - a) / 2; }
   else { x = (p.x - 180) / 6.4; y = (p.y - 65) / 4.7; }
   [x, y] = unrotated(x, y);
+  return [x, y];
+}
+function worldAt(event) {
+  const [x, y] = worldFromEvent(event);
   return x >= 0 && x <= 100 && y >= 0 && y <= 100 ? [round(x), round(y)] : null;
 }
 function handleSceneClick(event) {
+  if (ignoreSceneClick) { ignoreSceneClick = false; return; }
   const assetNode = event.target.closest('[data-asset]');
   const zoneNode = event.target.closest('[data-zone]');
   if (mode === 'connect') {
     const from = selectedAsset(), to = assetNode && assetById(assetNode.dataset.asset);
     if (!to || to.id === from?.id) { toast('Select a different placed equipment item.'); return; }
     if (project.cables.some(c => (c.from === from.id && c.to === to.id) || (c.from === to.id && c.to === from.id))) { toast('These items are already connected.'); return; }
-    project.cables.push({ id: uid(), from: from.id, to: to.id }); save(); setMode('select'); render(); toast(`Connected ${from.name} to ${to.name}.`); return;
+    project.cables.push({ id: uid(), from: from.id, to: to.id }); save(); inspectorOpen = true; setMode('select'); render(); toast(`Connected ${from.name} to ${to.name}.`); return;
   }
   if (mode === 'place') {
     const location = worldAt(event), asset = selectedAsset();
     if (!location || !asset) { toast('Choose a point inside the floor plan.'); return; }
-    [asset.x, asset.y] = location; asset.placed = true;
-    const containing = project.zones.filter(z => asset.x >= z.x && asset.x <= z.x + z.w && asset.y >= z.y && asset.y <= z.y + z.h).sort((a,b) => a.w*a.h-b.w*b.h)[0];
-    asset.zoneId = containing?.id || '';
-    save(); setMode('select'); render(); toast(`${asset.name} placed on the floor plan.`); return;
+    Object.assign(asset, placeAsset(asset, project.zones, ...location));
+    save(); inspectorOpen = true; setMode('select'); render(); toast(`${asset.name} placed on the floor plan.`); return;
   }
   if (mode === 'zone') {
     const location = worldAt(event);
@@ -230,13 +234,39 @@ function handleSceneClick(event) {
     const w = Math.abs(zoneStart[0] - location[0]), h = Math.abs(zoneStart[1] - location[1]);
     if (w < 2 || h < 2) { toast('Choose two corners with more space between them.'); return; }
     const zone = { id: uid(), name: `Zone ${project.zones.length + 1}`, x, y, w: round(w), h: round(h) };
-    project.zones.push(zone); selected = { kind: 'zone', id: zone.id }; save(); setMode('select'); render(); toast('Zone added. Name it in the details panel.'); return;
+    project.zones.push(zone); selected = { kind: 'zone', id: zone.id }; inspectorOpen = true; save(); setMode('select'); render(); toast('Zone added. Name it in the details panel.'); return;
   }
   if (assetNode) chooseAsset(assetNode.dataset.asset);
-  else if (zoneNode) { selected = { kind: 'zone', id: zoneNode.dataset.zone }; render(); }
+  else if (zoneNode) { selected = { kind: 'zone', id: zoneNode.dataset.zone }; inspectorOpen = true; render(); }
 }
 
 $('#scene').addEventListener('click', handleSceneClick);
+$('#scene').addEventListener('pointerdown', event => {
+  const node = event.target.closest('[data-asset]');
+  const asset = node && assetById(node.dataset.asset);
+  if (mode !== 'select' || !asset?.placed || !event.isPrimary || event.button !== 0) return;
+  drag = { id: asset.id, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, start: worldFromEvent(event), original: { ...asset }, moved: false };
+  $('#scene').setPointerCapture(event.pointerId);
+});
+$('#scene').addEventListener('pointermove', event => {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (!drag.moved && Math.hypot(event.clientX - drag.clientX, event.clientY - drag.clientY) < 4) return;
+  drag.moved = true; $('#scene').classList.add('dragging');
+  const [x, y] = worldFromEvent(event), asset = assetById(drag.id);
+  Object.assign(asset, placeAsset(asset, project.zones, drag.original.x + x - drag.start[0], drag.original.y + y - drag.start[1]));
+  renderScene();
+});
+$('#scene').addEventListener('pointerup', event => {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const { id, moved } = drag; drag = null; $('#scene').classList.remove('dragging');
+  ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0);
+  if (moved) save();
+  chooseAsset(id);
+});
+$('#scene').addEventListener('pointercancel', event => {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  Object.assign(assetById(drag.id), drag.original); drag = null; $('#scene').classList.remove('dragging'); renderScene();
+});
 $('#scene').addEventListener('keydown', event => {
   if ((event.key === 'Enter' || event.key === ' ') && event.target.closest('[data-asset]')) { event.preventDefault(); event.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
 });
@@ -245,7 +275,7 @@ document.addEventListener('click', event => {
   const assetButton = event.target.closest('[data-asset-select]');
   if (assetButton) { chooseAsset(assetButton.dataset.assetSelect); return; }
   const zoneButton = event.target.closest('[data-zone-select]');
-  if (zoneButton) { selected = { kind: 'zone', id: zoneButton.dataset.zoneSelect }; setMode('select'); render(); return; }
+  if (zoneButton) { selected = { kind: 'zone', id: zoneButton.dataset.zoneSelect }; inspectorOpen = true; setMode('select'); render(); return; }
   const removeCable = event.target.closest('[data-remove-cable]');
   if (removeCable) { project.cables = project.cables.filter(c => c.id !== removeCable.dataset.removeCable); save(); render(); showConnections(); toast('Connection removed.'); return; }
   const viewButton = event.target.closest('[data-view]');
@@ -261,25 +291,26 @@ document.addEventListener('click', event => {
     case 'inventory': closeDialogs(); $('#inventory-dialog').showModal(); break;
     case 'show-connections': showConnections(); break;
     case 'close-dialog': closeDialogs(); break;
+    case 'close-inspector': selected = { kind: null, id: null }; inspectorOpen = false; setMode('select'); render(); break;
     case 'import-csv': $('#inventory-file').click(); break;
     case 'upload-plan': $('#plan-file').click(); break;
     case 'import-project': $('#project-file').click(); break;
-    case 'add-zone': closeDialogs(); setMode('zone', 'Choose the first corner of the new zone'); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); break;
-    case 'cancel-mode': setMode('select'); break;
+    case 'add-zone': closeDialogs(); inspectorOpen = false; renderInspector(); setMode('zone', 'Choose the first corner of the new zone'); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); break;
+    case 'cancel-mode': inspectorOpen = !!selected.id; setMode('select'); renderInspector(); break;
     case 'add-asset': {
       const added = { id: uid(), name: 'New equipment', type: 'switch', zoneId: '', model: '', ip: '', managementUrl: '', placed: false };
-      project.assets.push(added); selected = { kind: 'asset', id: added.id }; closeDialogs(); save(); setMode('select'); render(); toast('Equipment added. Edit its details and place it on the plan.'); break;
+      project.assets.push(added); selected = { kind: 'asset', id: added.id }; inspectorOpen = true; closeDialogs(); save(); setMode('select'); render(); toast('Equipment added. Edit its details and place it on the plan.'); break;
     }
-    case 'place-asset': if (asset) { setMode('place', `Choose a position for ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); } break;
+    case 'place-asset': if (asset) { inspectorOpen = false; renderInspector(); setMode('place', `Choose a position for ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); } break;
     case 'connect-asset':
       if (!asset?.placed) toast('Place this equipment on the plan first.');
-      else { setMode('connect', `Select equipment to connect to ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      else { inspectorOpen = false; renderInspector(); setMode('connect', `Select equipment to connect to ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
       break;
     case 'delete-asset':
-      if (asset && confirm(`Remove ${asset.name} and its connections?`)) { project.assets = project.assets.filter(a => a.id !== asset.id); project.cables = project.cables.filter(c => c.from !== asset.id && c.to !== asset.id); selected = { kind: 'asset', id: project.assets[0]?.id }; save(); setMode('select'); render(); toast('Equipment removed.'); }
+      if (asset && confirm(`Remove ${asset.name} and its connections?`)) { project.assets = project.assets.filter(a => a.id !== asset.id); project.cables = project.cables.filter(c => c.from !== asset.id && c.to !== asset.id); selected = { kind: null, id: null }; save(); setMode('select'); render(); toast('Equipment removed.'); }
       break;
     case 'delete-zone':
-      if (zone && confirm(`Remove ${zone.name}? Equipment will remain on the plan but become unassigned.`)) { project.zones = project.zones.filter(z => z.id !== zone.id); project.assets.forEach(a => { if (a.zoneId === zone.id) a.zoneId = ''; }); selected = { kind: 'asset', id: project.assets[0]?.id }; save(); render(); toast('Zone removed.'); }
+      if (zone && confirm(`Remove ${zone.name}? Equipment will remain on the plan but become unassigned.`)) { project.zones = project.zones.filter(z => z.id !== zone.id); project.assets.forEach(a => { if (a.zoneId === zone.id) a.zoneId = ''; }); selected = { kind: null, id: null }; save(); render(); toast('Zone removed.'); }
       break;
     case 'auto-place': {
       const before = project.assets.filter(a => a.placed).length;
@@ -363,9 +394,14 @@ $('#project-file').addEventListener('change', async event => {
     if (file.size > 5_000_000) throw new Error('Project file must be smaller than 5 MB.');
     const imported = restoreProject(JSON.parse(await file.text()));
     if (confirm('Replace the current project with this file? Export the current project first if you need a backup.')) {
-      project = imported; selected = { kind: 'asset', id: project.assets[0]?.id }; rotation = 0; zoom = 1; setMode('select'); save(); render(); toast('Project imported.');
+      project = imported; selected = { kind: null, id: null }; rotation = 0; zoom = 1; setMode('select'); save(); render(); toast('Project imported.');
     }
   } catch (error) { alert(`Could not import project: ${error.message}`); }
   event.target.value = '';
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+  if (mode !== 'select') { inspectorOpen = !!selected.id; setMode('select'); renderInspector(); }
+  else if (!$('.inspector').hidden) { selected = { kind: null, id: null }; inspectorOpen = false; render(); }
 });
 render();

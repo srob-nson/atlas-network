@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseInventory, autoPlace, safeManagementUrl, restoreProject } from '../dist/model.js';
+import { parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset } from '../dist/model.js';
 
 test('inventory import accepts quoted fields, matches zones, and reports unsupported types', () => {
   const zones = [{ id: 'z1', name: 'Network Room' }];
@@ -37,4 +37,15 @@ test('project import rejects malformed geometry and removes unsafe management li
   assert.throws(() => restoreProject({ name: 'Bad', zones: [{ x: 'oops' }], assets: [], cables: [] }), /invalid/i);
   const result = restoreProject({ name: 'Example', zones: [], assets: [{ id: 'a', name: 'Switch', type: 'switch', managementUrl: 'javascript:alert(1)', placed: false }], cables: [] });
   assert.equal(result.assets[0].managementUrl, '');
+});
+
+test('moving equipment stays on the floor and assigns the smallest containing zone', () => {
+  const zones = [
+    { id: 'floor', x: 0, y: 0, w: 100, h: 100 },
+    { id: 'room', x: 20, y: 20, w: 30, h: 30 }
+  ];
+  const asset = { id: 'a', zoneId: '', placed: false };
+  assert.deepEqual(placeAsset(asset, zones, 25, 30), { id: 'a', zoneId: 'room', placed: true, x: 25, y: 30 });
+  assert.deepEqual(placeAsset(asset, zones, -5, 120), { id: 'a', zoneId: 'floor', placed: true, x: 0, y: 100 });
+  assert.equal(asset.placed, false);
 });

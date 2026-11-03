@@ -1,5 +1,13 @@
 export const TYPES = ['cabinet', 'switch', 'router', 'firewall', 'access_point', 'patch_panel'];
 
+export function placeAsset(asset, zones, x, y) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new TypeError('Position must be finite.');
+  x = Math.round(Math.max(0, Math.min(100, x)) * 100) / 100;
+  y = Math.round(Math.max(0, Math.min(100, y)) * 100) / 100;
+  const zone = zones.filter(z => x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h).sort((a, b) => a.w * a.h - b.w * b.h)[0];
+  return { ...asset, x, y, placed: true, zoneId: zone?.id || '' };
+}
+
 export function safeManagementUrl(value) {
   try {
     const url = new URL(value);
