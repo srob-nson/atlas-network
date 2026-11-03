@@ -14,12 +14,11 @@ await evaluate(`document.querySelector('[data-action="show-racks"]').click(); do
 async function double(selector) { await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`); const p=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`); for (const count of [1,2]) { await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:count,...p}); await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:count,...p}); } }
 await double('[data-port-device="core"][data-port-name="1"]');
 assert.equal(await evaluate(`document.querySelectorAll('.rack-port.armed').length`),1);
-await double('[data-port-device="firewall"][data-port-name="1"]');
+assert.equal(await evaluate(`!!document.querySelector('#connect-to')`), true);
+await evaluate(`const color=document.querySelector('#connection-color'); color.value='#2368ae'; color.dispatchEvent(new Event('change',{bubbles:true})); const select=document.querySelector('#connect-to'); select.value=[...select.options].find(o => o.textContent.includes('FW-01') && o.textContent.includes('· 1')).value; select.dispatchEvent(new Event('change',{bubbles:true}))`);
 await new Promise(r=>setTimeout(r,100));
 assert.equal(await evaluate(`document.querySelectorAll('#rack-cables path').length`),1);
 assert.equal(await evaluate(`JSON.parse(localStorage.getItem('network-atlas-project-v1')).cables.filter(c=>c.fromPort==='1' && c.toPort==='1').length`),1);
-await evaluate(`document.querySelector('[data-rack-device="core"]').click(); const project=JSON.parse(localStorage.getItem('network-atlas-project-v1')); const cable=project.cables.find(c=>c.fromPort==='1' && c.toPort==='1'); document.querySelector('[data-edit-port="'+cable.id+'"]').click(); const f=document.querySelector('#port-form'); f.elements.color.value='#2368ae'; f.requestSubmit()`);
-await new Promise(r=>setTimeout(r,100));
 const check = await evaluate(`(() => {
   const path=document.querySelector('#rack-cables path'), svg=path.ownerSVGElement, matrix=svg.getScreenCTM();
   const point=position => { const p=path.getPointAtLength(position).matrixTransform(matrix); return [p.x,p.y]; };
@@ -30,4 +29,15 @@ const check = await evaluate(`(() => {
 for (const [actual, expected] of [[check.start,check.a], [check.end,check.b]]) assert.ok(Math.hypot(actual[0]-expected[0],actual[1]-expected[1]) < 0.5, JSON.stringify(check));
 assert.deepEqual(check.colors, ['rgb(35, 104, 174)', 'rgb(35, 104, 174)']);
 assert.equal(check.stroke, '#2368ae');
-console.log('Rack cable alignment and endpoint colours passed'); socket.close();
+await evaluate(`document.querySelector('[data-port-device="firewall"][data-port-name="1"]').dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})); const editedColor=document.querySelector('#connection-color'); editedColor.value='#aa1122'; editedColor.dispatchEvent(new Event('change',{bubbles:true}))`);
+assert.equal(await evaluate(`JSON.parse(localStorage.getItem('network-atlas-project-v1')).cables.find(c=>c.fromPort==='1' && c.toPort==='1').color`), '#aa1122');
+assert.equal(await evaluate(`getComputedStyle(document.querySelector('[data-port-device="core"][data-port-name="1"]')).backgroundColor`), 'rgb(170, 17, 34)');
+await double('[data-port-device="firewall"][data-port-name="1"]');
+assert.equal(await evaluate(`JSON.parse(localStorage.getItem('network-atlas-project-v1')).cables.filter(c=>c.fromPort==='1' && c.toPort==='1').length`), 0);
+assert.equal(await evaluate(`document.querySelectorAll('#rack-cables path').length`), 0);
+await double('[data-port-device="core"][data-port-name="2"]');
+await double('[data-port-device="firewall"][data-port-name="2"]');
+assert.equal(await evaluate(`JSON.parse(localStorage.getItem('network-atlas-project-v1')).cables.filter(c=>c.fromPort==='2' && c.toPort==='2').length`), 1);
+await double('[data-port-device="core"][data-port-name="2"]');
+assert.equal(await evaluate(`JSON.parse(localStorage.getItem('network-atlas-project-v1')).cables.filter(c=>c.fromPort==='2' && c.toPort==='2').length`), 0);
+console.log('Rack connection dropdown, alignment, colours and removal from either endpoint passed'); socket.close();
