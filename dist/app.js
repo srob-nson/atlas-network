@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset } from './model.js?v=2';
+import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset, cableRoute } from './model.js?v=3';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -36,6 +36,7 @@ try { project = localStorage.getItem(storageKey) ? restoreProject(JSON.parse(loc
 catch { project = structuredClone(demo); }
 let selected = { kind: null, id: null };
 let view = '3d', rotation = 0, zoom = 1, mode = 'select', zoneStart = null;
+let pan = { x: 0, y: 0 }, pointIndex = null;
 let drag = null, ignoreSceneClick = false, inspectorOpen = false;
 let toastTimer;
 
@@ -50,6 +51,7 @@ function save() {
 function zoneFor(asset) { return project.zones.find(zone => zone.id === asset.zoneId); }
 function assetById(id) { return project.assets.find(asset => asset.id === id); }
 function selectedAsset() { return selected.kind === 'asset' ? assetById(selected.id) : null; }
+function selectedCable() { return selected.kind === 'cable' ? project.cables.find(c => c.id === selected.id) : null; }
 function currentZone() { return selected.kind === 'zone' ? project.zones.find(zone => zone.id === selected.id) : null; }
 function zoneOptions(id) { return `<option value="">Unassigned</option>${project.zones.map(z => `<option value="${esc(z.id)}" ${z.id === id ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}`; }
 function typeOptions(type) { return TYPES.map(value => `<option value="${value}" ${value === type ? 'selected' : ''}>${typeName(value)}</option>`).join(''); }
@@ -77,11 +79,13 @@ function render() {
 }
 
 function renderInspector() {
-  const target = $('#inspector-content'), asset = selectedAsset(), zone = currentZone();
-  $('.inspector').hidden = !inspectorOpen || (!asset && !zone);
+  const target = $('#inspector-content'), asset = selectedAsset(), zone = currentZone(), cable = selectedCable();
+  $('.inspector').hidden = !inspectorOpen || (!asset && !zone && !cable);
   if (asset) {
     const url = safeManagementUrl(asset.managementUrl);
     target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.placed ? 'Placed on plan' : 'Ready to place'}</span><span class="badge gray">${esc(zoneFor(asset)?.name || 'Unassigned')}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label><label class="field"><span>Floor zone</span><select name="zoneId">${zoneOptions(asset.zoneId)}</select></label><label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label><label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label></form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions"><button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button><button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
+  } else if (cable) {
+    target.innerHTML = `<div class="inspector-eyebrow">SELECTED CABLE</div><h3>${esc(assetById(cable.from)?.name)} → ${esc(assetById(cable.to)?.name)}</h3><p class="detail-note">Click a segment to add a point. Drag points onto the grid, or focus a point and use arrow keys. Delete removes it.</p><div class="detail-actions"><button class="detail-button" data-action="add-point">Add point</button><button class="detail-button" data-action="remove-point" ${pointIndex === null ? 'disabled' : ''}>Remove selected point</button><button class="detail-button" data-action="reset-route">Reset automatic route</button></div>`;
   } else if (zone) {
     target.innerHTML = `<div class="inspector-eyebrow">SELECTED FLOOR ZONE</div><div class="detail-hero"><span class="detail-icon">${icon('layers')}</span><div><h3>${esc(zone.name)}</h3><p>${project.assets.filter(a => a.zoneId === zone.id).length} assigned equipment items</p></div></div><div class="detail-divider"></div><div class="detail-heading"><strong>Zone boundaries</strong><span>% OF PLAN</span></div><form id="zone-form"><label class="field"><span>Zone name</span><input name="name" value="${esc(zone.name)}" maxlength="80" required></label><div class="field-row"><label class="field"><span>Left</span><input name="x" type="number" min="0" max="99" step="1" value="${Math.round(zone.x)}"></label><label class="field"><span>Top</span><input name="y" type="number" min="0" max="99" step="1" value="${Math.round(zone.y)}"></label></div><div class="field-row"><label class="field"><span>Width</span><input name="w" type="number" min="1" max="100" step="1" value="${Math.round(zone.w)}"></label><label class="field"><span>Height</span><input name="h" type="number" min="1" max="100" step="1" value="${Math.round(zone.h)}"></label></div></form><p class="detail-note">Zones guide automatic placement. Adjust their boundaries to match your floor plan.</p><div class="detail-divider"></div><button class="detail-button danger" data-action="delete-zone">${icon('trash')} Remove zone</button>`;
   } else {
@@ -152,7 +156,7 @@ function assetShape(asset) {
 function renderScene() {
   const scene = $('#scene');
   const width = 900 / zoom, height = 500 / zoom;
-  scene.setAttribute('viewBox', `${500-width/2} ${285-height/2} ${width} ${height}`);
+  scene.setAttribute('viewBox', `${500-width/2 + pan.x} ${285-height/2 + pan.y} ${width} ${height}`);
   const floor = [[0,0],[100,0],[100,100],[0,100]];
   const p00 = point(0,0), p10 = point(100,0), p01 = point(0,100);
   const matrix = `${round((p10[0]-p00[0])/100)} ${round((p10[1]-p00[1])/100)} ${round((p01[0]-p00[0])/100)} ${round((p01[1]-p00[1])/100)} ${round(p00[0])} ${round(p00[1])}`;
@@ -173,24 +177,39 @@ function renderScene() {
     out += svgText(x, y + 2, z.name.toUpperCase(), 'text-anchor="middle" font-size="9" font-weight="700" letter-spacing="1" fill="#9caf9e" opacity=".85"');
   });
   out += demoFurniture() + demoWalls();
+  const editing = selectedCable();
+  if (editing) {
+    out += '<g class="route-editor" pointer-events="none">';
+    for (let x = 0; x <= 100; x += 5) for (let y = 0; y <= 100; y += 5) {
+      const [px, py] = point(x, y); out += `<circle cx="${round(px)}" cy="${round(py)}" r="1.5" fill="#688f78" opacity=".55"/>`;
+    }
+    out += '</g>';
+  }
   for (const cable of project.cables) {
     const a = assetById(cable.from), b = assetById(cable.to);
     if (!a?.placed || !b?.placed) continue;
-    const path = [[a.x,a.y],[b.x,a.y],[b.x,b.y]].map(p => point(...p).map(round).join(',')).join(' ');
-    out += `<polyline points="${path}" fill="none" stroke="#fff8e8" stroke-width="5" stroke-linejoin="round" opacity=".8"/><polyline data-cable="${esc(cable.id)}" points="${path}" fill="none" stroke="#d9a667" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const fixed = [a, ...(cable.waypoints || []), b];
+    const path = points(cableRoute(a, cable.waypoints || [], b));
+    out += `<polyline data-cable="${esc(cable.id)}" tabindex="0" role="button" aria-label="Cable ${esc(a.name)} to ${esc(b.name)}" points="${path}" fill="none" stroke="${cable === editing ? '#b3742f' : '#d9a667'}" stroke-width="${cable === editing ? 3 : 2.1}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    fixed.slice(1).forEach((next, i) => {
+      const segment = points(cableRoute(fixed[i], [], next));
+      out += `<polyline class="route-hit" data-cable-hit="${esc(cable.id)}" data-segment="${i}" points="${segment}" fill="none" stroke="transparent" stroke-width="16"/>`;
+    });
   }
   out += project.assets.filter(a => a.placed).sort((a,b) => { const [ax,ay] = rotated(a.x,a.y), [bx,by] = rotated(b.x,b.y); return ax+ay-bx-by; }).map(assetShape).join('');
+  if (editing) (editing.waypoints || []).forEach((p, i) => { const [x,y] = point(p.x,p.y); out += `<circle class="route-handle route-editor" data-point="${i}" tabindex="0" role="button" aria-label="Cable point ${i + 1}, x ${p.x}, y ${p.y}" cx="${round(x)}" cy="${round(y)}" r="${i === pointIndex ? 7 : 5}" fill="#fff" stroke="#a66524" stroke-width="2"/>`; });
   scene.innerHTML = out;
 }
 
 function closeDialogs() { document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
 function showConnections() {
-  $('#connection-list').innerHTML = project.cables.map(cable => `<div class="inventory-row"><span class="inventory-asset-icon">${icon('link')}</span><div><strong>${esc(assetById(cable.from)?.name || 'Unknown')} → ${esc(assetById(cable.to)?.name || 'Unknown')}</strong><small>Network cable</small></div><button class="tool-button" data-remove-cable="${esc(cable.id)}" title="Remove cable" aria-label="Remove cable">${icon('trash')}</button></div>`).join('') || '<p class="detail-note">There are no cables in this project yet.</p>';
+  $('#connection-list').innerHTML = project.cables.map(cable => `<div class="inventory-row"><span class="inventory-asset-icon">${icon('link')}</span><div><button class="cable-select" data-cable-select="${esc(cable.id)}"><strong>${esc(assetById(cable.from)?.name || 'Unknown')} → ${esc(assetById(cable.to)?.name || 'Unknown')}</strong><small>Edit cable route</small></button></div><button class="tool-button" data-remove-cable="${esc(cable.id)}" title="Remove cable" aria-label="Remove cable">${icon('trash')}</button></div>`).join('') || '<p class="detail-note">There are no cables in this project yet.</p>';
   closeDialogs(); $('#connections-dialog').showModal();
 }
 function chooseAsset(id) {
   selected = { kind: 'asset', id }; inspectorOpen = true; setMode('select'); closeDialogs(); render();
 }
+function chooseCable(id) { selected = { kind: 'cable', id }; pointIndex = null; inspectorOpen = true; setMode('select'); closeDialogs(); render(); }
 function download(name, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
@@ -218,7 +237,7 @@ function handleSceneClick(event) {
     const from = selectedAsset(), to = assetNode && assetById(assetNode.dataset.asset);
     if (!to || to.id === from?.id) { toast('Select a different placed equipment item.'); return; }
     if (project.cables.some(c => (c.from === from.id && c.to === to.id) || (c.from === to.id && c.to === from.id))) { toast('These items are already connected.'); return; }
-    project.cables.push({ id: uid(), from: from.id, to: to.id }); save(); inspectorOpen = true; setMode('select'); render(); toast(`Connected ${from.name} to ${to.name}.`); return;
+    project.cables.push({ id: uid(), from: from.id, to: to.id, waypoints: [] }); save(); inspectorOpen = true; setMode('select'); render(); toast(`Connected ${from.name} to ${to.name}.`); return;
   }
   if (mode === 'place') {
     const location = worldAt(event), asset = selectedAsset();
@@ -236,42 +255,102 @@ function handleSceneClick(event) {
     const zone = { id: uid(), name: `Zone ${project.zones.length + 1}`, x, y, w: round(w), h: round(h) };
     project.zones.push(zone); selected = { kind: 'zone', id: zone.id }; inspectorOpen = true; save(); setMode('select'); render(); toast('Zone added. Name it in the details panel.'); return;
   }
+  const cableNode = event.target.closest('[data-cable], [data-cable-hit]');
+  if (cableNode) { chooseCable(cableNode.dataset.cable || cableNode.dataset.cableHit); return; }
   if (assetNode) chooseAsset(assetNode.dataset.asset);
   else if (zoneNode) { selected = { kind: 'zone', id: zoneNode.dataset.zone }; inspectorOpen = true; render(); }
 }
 
 $('#scene').addEventListener('click', handleSceneClick);
+const pointers = new Map();
+function svgPosition(x, y) {
+  const svg = $('#scene'), p = svg.createSVGPoint(); p.x = x; p.y = y;
+  return p.matrixTransform(svg.getScreenCTM().inverse());
+}
+function snap(event) { const [x,y] = worldFromEvent(event); return { x: Math.max(0, Math.min(100, Math.round(x / 5) * 5)), y: Math.max(0, Math.min(100, Math.round(y / 5) * 5)) }; }
+function cancelDrag() {
+  if (!drag) return;
+  if (drag.kind === 'asset') Object.assign(assetById(drag.id), drag.original);
+  if (drag.kind === 'point') { const cable = project.cables.find(c => c.id === drag.id); cable.waypoints = drag.original; if (drag.inserted) pointIndex = null; }
+  if (drag.kind === 'pan') pan = drag.original;
+  drag = null; $('#scene').classList.remove('dragging'); renderScene();
+}
+function zoomAt(value, x, y) {
+  const before = svgPosition(x, y); zoom = Math.max(.6, Math.min(1.8, value)); renderScene();
+  const after = svgPosition(x, y); pan.x += before.x - after.x; pan.y += before.y - after.y; render();
+}
+$('#scene').addEventListener('wheel', event => { if (event.ctrlKey || event.metaKey) return; event.preventDefault(); zoomAt(zoom * Math.exp(-event.deltaY * .001), event.clientX, event.clientY); }, { passive: false });
 $('#scene').addEventListener('pointerdown', event => {
-  const node = event.target.closest('[data-asset]');
-  const asset = node && assetById(node.dataset.asset);
-  if (mode !== 'select' || !asset?.placed || !event.isPrimary || event.button !== 0) return;
-  drag = { id: asset.id, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, start: worldFromEvent(event), original: { ...asset }, moved: false };
+  if (event.button !== 0) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   $('#scene').setPointerCapture(event.pointerId);
+  if (pointers.size === 2) {
+    cancelDrag(); const [a,b] = [...pointers.values()];
+    drag = { kind: 'pinch', distance: Math.hypot(a.x-b.x,a.y-b.y), zoom, center: [(a.x+b.x)/2,(a.y+b.y)/2] };
+    return;
+  }
+  if (mode !== 'select') return;
+  const node = event.target.closest('[data-asset]'), asset = node && assetById(node.dataset.asset);
+  const handle = event.target.closest('[data-point]'), hit = event.target.closest('[data-cable-hit]');
+  const base = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, moved: false };
+  if (handle && selectedCable()) {
+    pointIndex = Number(handle.dataset.point);
+    drag = { ...base, kind: 'point', id: selected.id, original: structuredClone(selectedCable().waypoints || []) };
+  } else if (hit && selectedCable()?.id === hit.dataset.cableHit) {
+    const cable = selectedCable(), original = structuredClone(cable.waypoints || []);
+    pointIndex = Number(hit.dataset.segment); cable.waypoints ||= []; cable.waypoints.splice(pointIndex, 0, snap(event));
+    drag = { ...base, kind: 'point', id: cable.id, original, inserted: true }; renderScene();
+  } else if (hit) {
+    drag = { ...base, kind: 'cable', id: hit.dataset.cableHit };
+  } else if (asset?.placed) {
+    drag = { ...base, kind: 'asset', id: asset.id, start: worldFromEvent(event), original: { ...asset } };
+  } else if (!hit && !event.target.closest('[data-cable]')) {
+    drag = { ...base, kind: 'pan', target: event.target, start: svgPosition(event.clientX,event.clientY), original: { ...pan } };
+  }
 });
 $('#scene').addEventListener('pointermove', event => {
+  if (!pointers.has(event.pointerId)) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (drag?.kind === 'pinch' && pointers.size >= 2) {
+    const [a,b] = [...pointers.values()], center = [(a.x+b.x)/2,(a.y+b.y)/2];
+    const before = svgPosition(...drag.center), after = svgPosition(...center); pan.x += before.x-after.x; pan.y += before.y-after.y;
+    renderScene(); zoomAt(drag.zoom * Math.hypot(a.x-b.x,a.y-b.y) / drag.distance, ...center); drag.center = center; return;
+  }
   if (!drag || event.pointerId !== drag.pointerId) return;
-  if (!drag.moved && Math.hypot(event.clientX - drag.clientX, event.clientY - drag.clientY) < 4) return;
+  if (!drag.moved && Math.hypot(event.clientX-drag.clientX,event.clientY-drag.clientY) < 4) return;
   drag.moved = true; $('#scene').classList.add('dragging');
-  const [x, y] = worldFromEvent(event), asset = assetById(drag.id);
-  Object.assign(asset, placeAsset(asset, project.zones, drag.original.x + x - drag.start[0], drag.original.y + y - drag.start[1]));
+  if (drag.kind === 'asset') { const [x,y] = worldFromEvent(event), asset = assetById(drag.id); Object.assign(asset, placeAsset(asset, project.zones, drag.original.x+x-drag.start[0], drag.original.y+y-drag.start[1])); }
+  if (drag.kind === 'point') selectedCable().waypoints[pointIndex] = snap(event);
+  if (drag.kind === 'pan') { const p = svgPosition(event.clientX,event.clientY); pan.x += drag.start.x-p.x; pan.y += drag.start.y-p.y; }
   renderScene();
 });
 $('#scene').addEventListener('pointerup', event => {
+  pointers.delete(event.pointerId);
+  if (drag?.kind === 'pinch') { drag = null; ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); return; }
   if (!drag || event.pointerId !== drag.pointerId) return;
-  const { id, moved } = drag; drag = null; $('#scene').classList.remove('dragging');
-  ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0);
-  if (moved) save();
-  chooseAsset(id);
+  const done = drag; drag = null; $('#scene').classList.remove('dragging');
+  if (done.kind === 'asset') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); if (done.moved) save(); chooseAsset(done.id); }
+  else if (done.kind === 'point') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); if (done.moved || done.inserted) save(); render(); }
+  else if (done.kind === 'cable') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); chooseCable(done.id); }
+  else if (done.kind === 'pan') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); if (!done.moved) { ignoreSceneClick = false; handleSceneClick({ target: done.target, clientX: event.clientX, clientY: event.clientY }); ignoreSceneClick = true; } }
 });
-$('#scene').addEventListener('pointercancel', event => {
-  if (!drag || event.pointerId !== drag.pointerId) return;
-  Object.assign(assetById(drag.id), drag.original); drag = null; $('#scene').classList.remove('dragging'); renderScene();
-});
+$('#scene').addEventListener('pointercancel', event => { pointers.delete(event.pointerId); cancelDrag(); });
 $('#scene').addEventListener('keydown', event => {
-  if ((event.key === 'Enter' || event.key === ' ') && event.target.closest('[data-asset]')) { event.preventDefault(); event.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+  const handle = event.target.closest('[data-point]'), cable = selectedCable();
+  if (handle && cable) {
+    pointIndex = Number(handle.dataset.point);
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) {
+      const p = cable.waypoints[pointIndex], dx = event.key === 'ArrowLeft' ? -5 : event.key === 'ArrowRight' ? 5 : 0, dy = event.key === 'ArrowUp' ? -5 : event.key === 'ArrowDown' ? 5 : 0;
+      p.x = Math.max(0,Math.min(100,p.x+dx)); p.y = Math.max(0,Math.min(100,p.y+dy)); save(); render(); $('#scene [data-point="'+pointIndex+'"]').focus(); event.preventDefault(); return;
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') { cable.waypoints.splice(pointIndex,1); pointIndex = null; save(); render(); event.preventDefault(); return; }
+  }
+  if ((event.key === 'Enter' || event.key === ' ') && event.target.closest('[data-asset], [data-cable]')) { event.preventDefault(); event.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
 });
 
 document.addEventListener('click', event => {
+  const cableButton = event.target.closest('[data-cable-select]');
+  if (cableButton) { chooseCable(cableButton.dataset.cableSelect); return; }
   const assetButton = event.target.closest('[data-asset-select]');
   if (assetButton) { chooseAsset(assetButton.dataset.assetSelect); return; }
   const zoneButton = event.target.closest('[data-zone-select]');
@@ -318,13 +397,16 @@ document.addEventListener('click', event => {
       const unassigned = project.assets.filter(a => !a.placed && !zoneFor(a)).length;
       save(); render(); toast(count ? `Placed ${count} equipment item${count === 1 ? '' : 's'} in assigned zones.${unassigned ? ` ${unassigned} still need a zone.` : ''}` : unassigned ? `${unassigned} equipment item${unassigned === 1 ? ' needs' : 's need'} a zone before auto-placement.` : 'All assigned equipment is already placed.'); break;
     }
+    case 'add-point': { const cable = selectedCable(); if (cable) { const a = assetById(cable.from), b = assetById(cable.to); cable.waypoints ||= []; cable.waypoints.push({ x: Math.round((a.x+b.x)/10)*5, y: Math.round((a.y+b.y)/10)*5 }); pointIndex = cable.waypoints.length-1; save(); render(); $('#scene [data-point="'+pointIndex+'"]').focus(); } break; }
+    case 'remove-point': { const cable = selectedCable(); if (cable && pointIndex !== null) { cable.waypoints.splice(pointIndex,1); pointIndex = null; save(); render(); } break; }
+    case 'reset-route': { const cable = selectedCable(); if (cable) { cable.waypoints = []; pointIndex = null; save(); render(); } break; }
     case 'rotate': rotation = (rotation + 1) % 4; render(); break;
     case 'zoom-in': zoom = Math.min(1.8, round(zoom + .2)); render(); break;
     case 'zoom-out': zoom = Math.max(.6, round(zoom - .2)); render(); break;
-    case 'reset-view': rotation = 0; zoom = 1; render(); break;
+    case 'reset-view': rotation = 0; zoom = 1; pan = { x: 0, y: 0 }; render(); break;
     case 'export-project': download(`${projectFilename()}.json`, JSON.stringify(project, null, 2), 'application/json'); toast('Project exported.'); break;
     case 'export-svg': {
-      const copy = $('#scene').cloneNode(true); copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); copy.setAttribute('font-family', 'Inter, Arial, sans-serif');
+      const copy = $('#scene').cloneNode(true); copy.querySelectorAll('.route-editor, .route-hit').forEach(node => node.remove()); copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); copy.setAttribute('font-family', 'Inter, Arial, sans-serif');
       download(`${projectFilename()}-floor-plan.svg`, new XMLSerializer().serializeToString(copy), 'image/svg+xml'); toast('Diagram exported as SVG.'); break;
     }
     case 'rename-project': {
@@ -335,7 +417,7 @@ document.addEventListener('click', event => {
     case 'new-project':
       if (confirm('Start a blank project? Export the current project first if you want to keep a backup.')) {
         project = { name: 'Untitled project', floorName: 'Ground floor', planImage: '', demo: false, zones: [], assets: [], cables: [] };
-        selected = { kind: 'asset', id: null }; rotation = 0; zoom = 1; setMode('select'); save(); render(); toast('Blank project created. Upload a floor plan and add zones.');
+        selected = { kind: 'asset', id: null }; rotation = 0; zoom = 1; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Blank project created. Upload a floor plan and add zones.');
       }
       break;
   }
@@ -393,13 +475,14 @@ $('#project-file').addEventListener('change', async event => {
     if (file.size > 5_000_000) throw new Error('Project file must be smaller than 5 MB.');
     const imported = restoreProject(JSON.parse(await file.text()));
     if (confirm('Replace the current project with this file? Export the current project first if you need a backup.')) {
-      project = imported; selected = { kind: null, id: null }; rotation = 0; zoom = 1; setMode('select'); save(); render(); toast('Project imported.');
+      project = imported; selected = { kind: null, id: null }; rotation = 0; zoom = 1; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Project imported.');
     }
   } catch (error) { alert(`Could not import project: ${error.message}`); }
   event.target.value = '';
 });
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+  if (drag) { cancelDrag(); pointers.clear(); return; }
   if (mode !== 'select') { inspectorOpen = !!selected.id; setMode('select'); renderInspector(); }
   else if (!$('.inspector').hidden) { selected = { kind: null, id: null }; inspectorOpen = false; render(); }
 });

@@ -103,8 +103,20 @@ export function restoreProject(input) {
   });
   const cables = input.cables.map(cable => {
     if (!cable || typeof cable.id !== 'string' || !ids.has(cable.from) || !ids.has(cable.to) || cable.from === cable.to) invalid();
-    return { id: cable.id, from: cable.from, to: cable.to };
+    const waypoints = cable.waypoints === undefined ? [] : cable.waypoints;
+    if (!Array.isArray(waypoints) || !waypoints.every(p => p && ['x', 'y'].every(k => Number.isFinite(p[k]) && p[k] >= 0 && p[k] <= 100 && p[k] % 5 === 0))) invalid();
+    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })) };
   });
   const planImage = typeof input.planImage === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(input.planImage) ? input.planImage : '';
   return { name: input.name, floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets, cables };
+}
+
+export function cableRoute(from, waypoints, to) {
+  const route = [[from.x, from.y]];
+  for (const next of [...waypoints, to]) {
+    const [x, y] = route.at(-1);
+    if (x !== next.x) route.push([next.x, y]);
+    if (y !== next.y) route.push([next.x, next.y]);
+  }
+  return route;
 }

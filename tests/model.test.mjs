@@ -49,3 +49,23 @@ test('moving equipment stays on the floor and assigns the smallest containing zo
   assert.deepEqual(placeAsset(asset, zones, -5, 120), { id: 'a', zoneId: 'floor', placed: true, x: 0, y: 100 });
   assert.equal(asset.placed, false);
 });
+
+test('cable waypoints round trip and reject invalid geometry', () => {
+  const input = { name: 'Routes', zones: [], assets: [
+    { id: 'a', name: 'A', type: 'switch', placed: true, x: 12, y: 18 },
+    { id: 'b', name: 'B', type: 'router', placed: true, x: 90, y: 80 }
+  ], cables: [{ id: 'c', from: 'a', to: 'b' }] };
+  assert.deepEqual(restoreProject(input).cables[0].waypoints, []);
+  input.cables[0].waypoints = [{ x: 5, y: 10 }, { x: 100, y: 0 }];
+  assert.deepEqual(restoreProject(JSON.parse(JSON.stringify(input))).cables[0].waypoints, input.cables[0].waypoints);
+  for (const waypoints of [null, {}, [{ x: '5', y: 0 }], [{ x: Infinity, y: 0 }], [{ x: -5, y: 0 }], [{ x: 101, y: 0 }], [{ x: 2, y: 0 }]]) {
+    assert.throws(() => restoreProject({ ...input, cables: [{ ...input.cables[0], waypoints }] }), /invalid/i);
+  }
+});
+
+test('routes connect fixed points with orthogonal elbows', async () => {
+  const { cableRoute } = await import('../dist/model.js');
+  assert.deepEqual(cableRoute({ x: 12, y: 18 }, [{ x: 30, y: 40 }, { x: 60, y: 40 }], { x: 83, y: 72 }), [
+    [12, 18], [30, 18], [30, 40], [60, 40], [83, 40], [83, 72]
+  ]);
+});

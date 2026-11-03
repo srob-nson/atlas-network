@@ -13,3 +13,9 @@ Run locally with `python3 -m http.server 8000 --directory dist`, then open `http
 5. Export the current view as SVG for documentation, or export the project as JSON to back it up or move it to another browser. Import a JSON export from the same menu to restore it.
 
 Projects and floor-plan images are stored in the current browser. Clearing site data can remove them; export a JSON backup. The isometric view and cable paths are illustrative, not measured or engineered: zones, routes, physical clearance, rack capacity, and equipment suitability need review. This first version covers networking equipment; endpoints and OT assets are not included.
+
+### Navigating and routing cables
+
+Use the wheel over the floor plan to zoom around the pointer, or pinch on a touch screen. Drag empty plan space to pan; Reset view restores the original position, zoom and rotation.
+
+Select a cable on the plan or in Connections to edit its route. Click a segment to add a grid point, then drag points to move them. Select a point to remove it, or reset the route to automatic. The Add point control also creates a keyboard-focusable point: use arrow keys to move it and Delete or Backspace to remove it. Escape cancels an active drag. Cable points remain fixed when equipment moves and are saved with the project.
