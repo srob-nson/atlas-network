@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset } from './model.js';
+import { TYPES, parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsset } from './model.js?v=2';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
