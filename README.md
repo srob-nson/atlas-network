@@ -22,6 +22,6 @@ Select a cable on the plan or in Connections to edit its route. Click a segment 
 
 ### Racks and port connections
 
-Open **Racks** in the sidebar or select a cabinet on the floor plan. Rack-mountable devices are automatically assigned to the first cabinet in their zone; use the cabinet field in equipment details to change the assignment. Access points stay outside racks. Rack panels are illustrative and do not represent a specific model or rack-unit layout.
+Open **Racks** in the sidebar or select a cabinet on the floor plan. Rack-mountable devices are automatically assigned to the first cabinet in their zone; use the cabinet field in equipment details to change the assignment. Access points stay outside racks. Racked devices are hidden on the floor plan; cables to other locations terminate at the cabinet. Rack panels are illustrative and do not represent a specific model or rack-unit layout.
 
-Select a device panel to add or edit connections by port name, label and colour. Named ports can have one connection each. Connections appear in the project connection list and on the floor plan when both endpoints are placed; labels and colours are saved in project exports.
+Select a device or port to configure port speeds, add or remove ports, and create or edit connections by port, label and colour. Switches and patch panels start with 48 ports; routers and firewalls start with four. Connections within a rack are drawn between ports. Named ports can have one connection each. Connections appear in the project connection list and on the floor plan when both endpoints are placed; labels and colours are saved in project exports.

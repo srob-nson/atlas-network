@@ -83,3 +83,18 @@ test('rack assignments and connection details survive project restore', async ()
   assert.equal(project.assets[1].rackId, 'r');
   assert.deepEqual([project.cables[0].fromPort, project.cables[0].toPort, project.cables[0].label, project.cables[0].color], ['1', 'WAN', 'Uplink', '#123456']);
 });
+
+test('ports default by device type and survive restoration with legacy connections', async () => {
+  const { defaultPorts } = await import('../dist/model.js');
+  assert.equal(defaultPorts('switch').length, 48);
+  assert.equal(defaultPorts('router').length, 4);
+  assert.equal(defaultPorts('firewall').length, 4);
+  const input = { name: 'Ports', zones: [], assets: [
+    { id: 'a', name: 'A', type: 'switch', ports: [{ name: 'SFP', speed: '10 Gbps' }] },
+    { id: 'b', name: 'B', type: 'router' }
+  ], cables: [{ id: 'c', from: 'a', to: 'b', fromPort: 'SFP', toPort: 'WAN' }] };
+  const project = restoreProject(input);
+  assert.deepEqual(project.assets[0].ports, [{ name: 'SFP', speed: '10 Gbps' }]);
+  assert.ok(project.assets[1].ports.some(port => port.name === 'WAN'));
+  assert.deepEqual(restoreProject(project).assets[0].ports, project.assets[0].ports);
+});

@@ -69,6 +69,22 @@ export function assignRacks(assets) {
   });
 }
 
+export function defaultPorts(type) {
+  const count = type === 'switch' || type === 'patch_panel' ? 48 : type === 'router' || type === 'firewall' ? 4 : type === 'access_point' ? 1 : 0;
+  return Array.from({ length: count }, (_, i) => ({ name: String(i + 1), speed: '1 Gbps' }));
+}
+
+export function initializePorts(assets, cables) {
+  for (const asset of assets) {
+    if (!asset.ports) asset.ports = defaultPorts(asset.type);
+    for (const cable of cables) {
+      const name = cable.from === asset.id ? cable.fromPort : cable.to === asset.id ? cable.toPort : '';
+      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ name, speed: '1 Gbps' });
+    }
+  }
+  return assets;
+}
+
 export function autoPlace(assets, zones) {
   const result = assets.map(asset => ({ ...asset }));
   for (const zone of zones) {
@@ -112,6 +128,10 @@ export function restoreProject(input) {
   });
   for (const asset of assets) {
     const original = input.assets.find(a => a.id === asset.id);
+    if (original.ports !== undefined) {
+      if (!Array.isArray(original.ports) || original.ports.length > 512 || original.ports.some(p => !p || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80 || typeof p.speed !== 'string' || p.speed.length > 80) || new Set(original.ports.map(p => p.name.toLowerCase())).size !== original.ports.length) invalid();
+      asset.ports = original.ports.map(({ name, speed }) => ({ name, speed }));
+    }
     if (original.rackId !== undefined) asset.rackId = assets.some(a => a.id === original.rackId && a.type === 'cabinet' && a.id !== asset.id) ? original.rackId : '';
   }
   const assignedAssets = assignRacks(assets);
@@ -121,6 +141,7 @@ export function restoreProject(input) {
     if (!Array.isArray(waypoints) || !waypoints.every(p => p && ['x', 'y'].every(k => Number.isFinite(p[k]) && p[k] >= 0 && p[k] <= 100 && p[k] % 5 === 0))) invalid();
     return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667' };
   });
+  initializePorts(assignedAssets, cables);
   const planImage = typeof input.planImage === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(input.planImage) ? input.planImage : '';
   return { name: input.name, floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets: assignedAssets, cables };
 }
