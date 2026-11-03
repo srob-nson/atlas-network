@@ -1,4 +1,4 @@
-# Network Atlas
+# Titan
 
 A browser-local workspace for placing network equipment and cable connections on a floor plan. The initial project contains example data.
 

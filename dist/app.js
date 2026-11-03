@@ -6,7 +6,8 @@ const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const typeName = type => ({ cabinet: 'Cabinet', switch: 'Switch', router: 'Router', firewall: 'Firewall', access_point: 'Access point', patch_panel: 'Patch panel' })[type] || type;
 const typeIcon = type => type === 'access_point' ? 'nodes' : type === 'cabinet' ? 'layers' : 'box';
 const uid = () => crypto.randomUUID();
-const storageKey = 'network-atlas-project-v1';
+const storageKey = 'titan-project-v1';
+const legacyStorageKey = 'network-atlas-project-v1';
 
 const demo = {
   name: 'Northstar Campus', floorName: 'Ground floor', planImage: '', demo: true,
@@ -32,12 +33,13 @@ const demo = {
 };
 
 let project;
-try { project = localStorage.getItem(storageKey) ? restoreProject(JSON.parse(localStorage.getItem(storageKey))) : structuredClone(demo); }
+try { const saved = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey); project = saved ? restoreProject(JSON.parse(saved)) : structuredClone(demo); }
 catch { project = structuredClone(demo); }
 project.assets = initializePorts(assignRacks(project.assets), project.cables);
 let rackView = '', rackDevice = '', pendingPort = null;
 let selected = { kind: null, id: null };
-let view = '3d', rotation = 0, zoom = 1, mode = 'select';
+const defaultZoom = 1.1;
+let view = '3d', rotation = 0, zoom = defaultZoom, mode = 'select';
 let pan = { x: 0, y: 0 }, pointIndex = null;
 let drag = null, ignoreSceneClick = false, inspectorOpen = false;
 let toastTimer;
@@ -56,9 +58,9 @@ function selectedCable() { return selected.kind === 'cable' ? project.cables.fin
 function typeOptions(type) { return TYPES.map(value => `<option value="${value}" ${value === type ? 'selected' : ''}>${typeName(value)}</option>`).join(''); }
 function setMode(next, message) {
   mode = next;
-  $('#hint-text').textContent = message || 'Select or drag equipment';
+  $('#hint-text').textContent = message || 'Drag the floor to pan · drag equipment to move it';
   $('#cancel-mode').hidden = next === 'select';
-  $('#scene').style.cursor = next === 'select' ? 'default' : 'crosshair';
+  $('#scene').style.cursor = next === 'select' ? '' : 'crosshair';
 }
 
 function render() {
@@ -131,14 +133,14 @@ function demoWalls() {
 }
 function assetShape(asset) {
   const isSelected = selected.kind === 'asset' && selected.id === asset.id;
-  const size = asset.type === 'cabinet' ? 6.8 : asset.type === 'access_point' ? 4 : 5.2;
-  const height = asset.type === 'cabinet' ? 18 : asset.type === 'access_point' ? 2.3 : 4.5;
+  const size = asset.type === 'cabinet' ? 5.1 : asset.type === 'access_point' ? 3 : 3.9;
+  const height = asset.type === 'cabinet' ? 13.5 : asset.type === 'access_point' ? 1.7 : 3.4;
   const colors = isSelected ? ['#79b995','#3a785d','#4b8a6c'] : asset.type === 'cabinet' ? ['#6c9280','#496b5b','#547965'] : ['#a6c9b1','#6f9b7e','#83af90'];
   const [sx, sy] = point(asset.x, asset.y, height);
   let graphic = box(asset.x-size/2, asset.y-size/2, size, size, height, colors);
   if (asset.type === 'cabinet' && view === '3d') {
     for (let i = 0; i < 4; i++) {
-      const line = [[asset.x-size/2+0.7,asset.y+size/2,3+i*3],[asset.x+size/2-0.7,asset.y+size/2,3+i*3]].map(p => point(...p).map(round).join(',')).join(' ');
+      const line = [[asset.x-size/2+0.5,asset.y+size/2,2.25+i*2.25],[asset.x+size/2-0.5,asset.y+size/2,2.25+i*2.25]].map(p => point(...p).map(round).join(',')).join(' ');
       graphic += `<polyline points="${line}" fill="none" stroke="#9ab9a4" stroke-width="1.2" opacity=".8"/>`;
     }
   }
@@ -254,7 +256,7 @@ function download(name, content, type) {
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function projectFilename() { return project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'network-atlas'; }
+function projectFilename() { return project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'titan'; }
 function worldFromEvent(event) {
   const svg = $('#scene'), pt = svg.createSVGPoint(); pt.x = event.clientX; pt.y = event.clientY;
   const p = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -455,7 +457,7 @@ document.addEventListener('click', event => {
     case 'rotate': rotation = (rotation + 1) % 4; render(); break;
     case 'zoom-in': zoom = Math.min(1.8, round(zoom + .2)); render(); break;
     case 'zoom-out': zoom = Math.max(.6, round(zoom - .2)); render(); break;
-    case 'reset-view': rotation = 0; zoom = 1; pan = { x: 0, y: 0 }; render(); break;
+    case 'reset-view': rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; render(); break;
     case 'export-project': download(`${projectFilename()}.json`, JSON.stringify(project, null, 2), 'application/json'); toast('Project exported.'); break;
     case 'export-svg': {
       const copy = $('#scene').cloneNode(true); copy.querySelectorAll('.route-editor, .route-hit').forEach(node => node.remove()); copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); copy.setAttribute('font-family', 'Inter, Arial, sans-serif');
@@ -469,7 +471,7 @@ document.addEventListener('click', event => {
     case 'new-project':
       if (confirm('Start a blank project? Export the current project first if you want to keep a backup.')) {
         project = { name: 'Untitled project', floorName: 'Ground floor', planImage: '', demo: false, zones: [], assets: [], cables: [] };
-        selected = { kind: 'asset', id: null }; rotation = 0; zoom = 1; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Blank project created. Upload a floor plan and add equipment.');
+        selected = { kind: 'asset', id: null }; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Blank project created. Upload a floor plan and add equipment.');
       }
       break;
   }
@@ -528,7 +530,7 @@ $('#project-file').addEventListener('change', async event => {
     if (file.size > 5_000_000) throw new Error('Project file must be smaller than 5 MB.');
     const imported = restoreProject(JSON.parse(await file.text()));
     if (confirm('Replace the current project with this file? Export the current project first if you need a backup.')) {
-      project = imported; selected = { kind: null, id: null }; rotation = 0; zoom = 1; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Project imported.');
+      project = imported; selected = { kind: null, id: null }; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Project imported.');
     }
   } catch (error) { alert(`Could not import project: ${error.message}`); }
   event.target.value = '';

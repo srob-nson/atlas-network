@@ -36,8 +36,8 @@ let originalProject;
 try {
   await send('Runtime.enable'); await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
-  originalProject = await evaluate('localStorage.getItem("network-atlas-project-v1")');
-  await evaluate('localStorage.removeItem("network-atlas-project-v1")'); await send('Page.reload', { ignoreCache: true }); await wait(800);
+  originalProject = await evaluate('localStorage.getItem("titan-project-v1")');
+  await evaluate('localStorage.removeItem("titan-project-v1")'); await send('Page.reload', { ignoreCache: true }); await wait(800);
   assert.equal(await evaluate('document.querySelector(".inspector").hidden'), true, 'details are initially closed');
   let point = await assetPoint();
   await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1); await mouse('mouseReleased', point.x, point.y);
@@ -57,23 +57,23 @@ try {
   const dx = 13 * point.a + 29.6 * point.c, dy = 13 * point.b + 29.6 * point.d;
   await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1);
   await mouse('mouseMoved', point.x + dx, point.y + dy, 1); await mouse('mouseReleased', point.x + dx, point.y + dy);
-  let asset = await evaluate('JSON.parse(localStorage.getItem("network-atlas-project-v1")).assets.find(a => a.id === "core")');
+  let asset = await evaluate('JSON.parse(localStorage.getItem("titan-project-v1")).assets.find(a => a.id === "core")');
   assert.ok(Math.abs(asset.x - 35) < 1 && Math.abs(asset.y - 24) < 1, 'dragging follows the pointer without jumping');
   assert.equal(asset.zoneId, 'network', 'dragging assigns the containing zone');
   assert.notEqual(await evaluate('document.querySelector("[data-cable=c2]").getAttribute("points")'), cableBefore, 'connected cable redraws');
   assert.equal(await evaluate('document.querySelector(".inspector").hidden'), false, 'dragging selects the device');
   await send('Page.reload', { ignoreCache: true }); await wait(600);
-  asset = await evaluate('JSON.parse(localStorage.getItem("network-atlas-project-v1")).assets.find(a => a.id === "core")');
+  asset = await evaluate('JSON.parse(localStorage.getItem("titan-project-v1")).assets.find(a => a.id === "core")');
   assert.ok(Math.abs(asset.x - 35) < 1 && Math.abs(asset.y - 24) < 1, 'position survives a reload');
   await evaluate('document.querySelector("[data-action=show-connections]").click(); document.querySelector("[data-cable-select=c2]").click()');
   assert.equal(await evaluate('document.querySelectorAll(".route-editor circle").length'), 441, 'editing shows a floor grid');
   await evaluate('document.querySelector("[data-action=add-point]").click()');
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
-  let route = await evaluate('JSON.parse(localStorage.getItem("network-atlas-project-v1")).cables.find(c => c.id === "c2").waypoints');
+  let route = await evaluate('JSON.parse(localStorage.getItem("titan-project-v1")).cables.find(c => c.id === "c2").waypoints');
   assert.equal(route.length, 1, 'keyboard adds a fixed waypoint');
   assert.equal(route[0].x % 5, 0, 'waypoint remains on the grid');
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 });
-  route = await evaluate('JSON.parse(localStorage.getItem("network-atlas-project-v1")).cables.find(c => c.id === "c2").waypoints');
+  route = await evaluate('JSON.parse(localStorage.getItem("titan-project-v1")).cables.find(c => c.id === "c2").waypoints');
   assert.deepEqual(route, [], 'keyboard removes the waypoint');
   await evaluate('document.querySelector("[data-action=close-inspector]").click()');
   const anchor = await evaluate(`(() => { const s = document.querySelector('#scene'), r = s.getBoundingClientRect(), x = r.left+r.width*.4, y = r.top+r.height*.4, p = new DOMPoint(x,y).matrixTransform(s.getScreenCTM().inverse()); s.dispatchEvent(new WheelEvent('wheel', {clientX:x, clientY:y, deltaY:-120, bubbles:true, cancelable:true})); const q = new DOMPoint(x,y).matrixTransform(s.getScreenCTM().inverse()); return Math.hypot(p.x-q.x,p.y-q.y); })()`);
@@ -84,7 +84,7 @@ try {
   const planDx = -192 * point.a + 94 * point.c, planDy = -192 * point.b + 94 * point.d;
   await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1);
   await mouse('mouseMoved', point.x + planDx, point.y + planDy, 1); await mouse('mouseReleased', point.x + planDx, point.y + planDy);
-  asset = await evaluate('JSON.parse(localStorage.getItem("network-atlas-project-v1")).assets.find(a => a.id === "core")');
+  asset = await evaluate('JSON.parse(localStorage.getItem("titan-project-v1")).assets.find(a => a.id === "core")');
   assert.ok(Math.abs(asset.x - 55) < 1 && Math.abs(asset.y - 54) < 1, 'dragging accounts for plan rotation and zoom');
   assert.equal(asset.zoneId, 'workspace', 'dragging updates the assigned zone');
   await evaluate('document.querySelector("[data-action=close-inspector]").click()');
@@ -95,13 +95,13 @@ try {
   await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: point.x, y: point.y, id: 1 }] });
   await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x + touchDx, y: point.y + touchDy, id: 1 }] });
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  asset = await evaluate('JSON.parse(localStorage.getItem("network-atlas-project-v1")).assets.find(a => a.id === "core")');
+  asset = await evaluate('JSON.parse(localStorage.getItem("titan-project-v1")).assets.find(a => a.id === "core")');
   assert.ok(Math.abs(asset.x - 60) < 1 && Math.abs(asset.y - 59) < 1, 'touch dragging moves equipment');
   assert.deepEqual(exceptions, [], 'no uncaught browser errors');
   console.log('Browser interaction checks passed.');
 } finally {
   if (originalProject !== undefined) {
-    await evaluate(`{ const value = ${JSON.stringify(originalProject)}; if (value === null) localStorage.removeItem("network-atlas-project-v1"); else localStorage.setItem("network-atlas-project-v1", value); }`);
+    await evaluate(`{ const value = ${JSON.stringify(originalProject)}; if (value === null) localStorage.removeItem("titan-project-v1"); else localStorage.setItem("titan-project-v1", value); }`);
     await send('Page.reload', { ignoreCache: true });
   }
   socket.close();
