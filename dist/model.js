@@ -172,3 +172,37 @@ export function cableRoute(from, waypoints, to) {
   }
   return route;
 }
+
+export function restoreHierarchy(input) {
+  const invalid = () => { throw new Error('Invalid project file.'); };
+  if (!input?.buildings) {
+    const legacy = restoreProject(input);
+    const { name, cables, ...floor } = legacy;
+    return { name, buildings: [{ id: 'building-1', name: 'Building 1', floors: [{ id: 'floor-1', ...floor }] }], cables };
+  }
+  if (typeof input.name !== 'string' || !Array.isArray(input.buildings) || !input.buildings.length || !Array.isArray(input.cables)) invalid();
+  const buildingIds = new Set(), floorIds = new Set(), assetIds = new Set();
+  const buildings = input.buildings.map(building => {
+    if (!building || typeof building.id !== 'string' || !building.id || buildingIds.has(building.id) || typeof building.name !== 'string' || !Array.isArray(building.floors) || !building.floors.length) invalid();
+    buildingIds.add(building.id);
+    const floors = building.floors.map(floor => {
+      if (!floor || typeof floor.id !== 'string' || !floor.id || floorIds.has(floor.id)) invalid();
+      floorIds.add(floor.id);
+      const normalized = restoreProject({ ...floor, name: input.name, cables: [] });
+      for (const asset of normalized.assets) { if (assetIds.has(asset.id)) invalid(); assetIds.add(asset.id); }
+      const { name, cables, ...rest } = normalized;
+      return { id: floor.id, ...rest };
+    });
+    return { id: building.id, name: building.name, floors };
+  });
+  const assets = buildings.flatMap(b => b.floors.flatMap(f => f.assets));
+  const cables = restoreProject({ name: input.name, zones: [], assets, cables: input.cables }).cables;
+  const cableIds = new Set();
+  for (const cable of cables) {
+    if (!cable.id || cableIds.has(cable.id)) invalid();
+    cableIds.add(cable.id);
+
+  }
+  for (const building of buildings) for (const floor of building.floors) initializePorts(floor.assets, cables);
+  return { name: input.name, buildings, cables };
+}

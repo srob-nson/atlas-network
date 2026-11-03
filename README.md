@@ -1,21 +1,21 @@
 # Titan
 
-A browser-local workspace for placing network equipment and cable connections on a floor plan. The initial project contains example data.
+A browser-local workspace for placing network equipment and cable connections on floor plans across projects, buildings and floors. The initial project contains example data.
 
 Run locally with `python3 -m http.server 8000 --directory dist`, then open `http://localhost:8000`. Run the data checks with `npm test`.
 
 ## Start a design
 
-1. Use **Export → Start a blank project**, then upload a PNG, JPEG, or WebP floor plan (up to 2 MB).
+1. Create a project, building and floor using the sidebar controls, then upload a PNG, JPEG, or WebP floor plan (up to 2 MB). Switch floors using the sidebar selectors.
 2. Add equipment or import a CSV. The required columns are `name,type`; optional columns are `ip,management_url,model`. Supported types are `cabinet`, `switch`, `router`, `firewall`, `access_point`, and `patch_panel`.
 3. Select an item to open its details, or drag it directly on the floor plan. Use the details overlay to edit it, place it manually, open its HTTP(S) management interface, or connect it to another placed item. Auto-placement arranges unplaced floor equipment and leaves already placed equipment where it is.
 4. Export the current view as SVG for documentation, or export the project as JSON to back it up or move it to another browser. Import a JSON export from the same menu to restore it.
 
-Projects and floor-plan images are stored in the current browser. Clearing site data can remove them; export a JSON backup. The isometric view and cable paths are illustrative, not measured or engineered: routes, physical clearance, rack capacity, and equipment suitability need review. This first version covers networking equipment; endpoints and OT assets are not included.
+Projects and floor-plan images are stored in the current browser. JSON exports include the whole selected project; existing single-floor projects and backups migrate automatically. Equipment can connect across floors using the equipment details or rack port selector. Cross-floor connections show an endpoint on each plan, but do not show a physical route between floors. Clearing site data can remove them; export a JSON backup. The isometric view and cable paths are illustrative, not measured or engineered: routes, physical clearance, rack capacity, and equipment suitability need review. This first version covers networking equipment; endpoints and OT assets are not included.
 
 ### Navigating and routing cables
 
-Use the wheel over the floor plan to zoom around the pointer, or pinch on a touch screen. Drag empty plan space to pan; Reset view restores the original position, zoom and rotation.
+Use the mouse wheel, trackpad scroll or trackpad pinch over the floor plan to zoom around the pointer; touch screens also support pinch to zoom. Drag empty plan space to pan; Reset view restores the original position, zoom and rotation.
 
 Select a cable on the plan or in Connections to edit its route. Click a segment to add a grid point, then drag points to move them. Select a point to remove it, or reset the route to automatic. The Add point control also creates a keyboard-focusable point: use arrow keys to move it and Delete or Backspace to remove it. Escape cancels an active drag. Cable points remain fixed when equipment moves and are saved with the project.
 

@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts } from './model.js?v=8';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts } from './model.js?v=9';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -32,10 +32,39 @@ const demo = {
   ]
 };
 
-let project;
-try { const saved = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey); project = saved ? restoreProject(JSON.parse(saved)) : structuredClone(demo); }
-catch { project = structuredClone(demo); }
-project.assets = initializePorts(assignRacks(project.assets), project.cables);
+const workspaceKey = 'titan-workspace-v2';
+let workspace;
+try {
+  const saved = localStorage.getItem(workspaceKey);
+  const legacy = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey);
+  const raw = saved ? JSON.parse(saved) : { projects: [legacy ? JSON.parse(legacy) : demo] };
+  if (!Array.isArray(raw.projects) || !raw.projects.length) throw new Error('Invalid workspace');
+  workspace = { projects: raw.projects.map(restoreHierarchy), projectIndex: raw.projectIndex || 0, buildingIndex: raw.buildingIndex || 0, floorIndex: raw.floorIndex || 0 };
+} catch { workspace = { projects: [restoreHierarchy(demo)], projectIndex: 0, buildingIndex: 0, floorIndex: 0 }; }
+let currentProject, building, floor, project;
+function selectFloor() {
+  workspace.projectIndex = Math.min(workspace.projectIndex, workspace.projects.length - 1);
+  currentProject = workspace.projects[workspace.projectIndex];
+  workspace.buildingIndex = Math.min(workspace.buildingIndex, currentProject.buildings.length - 1);
+  building = currentProject.buildings[workspace.buildingIndex];
+  workspace.floorIndex = Math.min(workspace.floorIndex, building.floors.length - 1);
+  floor = building.floors[workspace.floorIndex];
+  project = floor;
+  Object.defineProperties(project, {
+    name: { configurable: true, get: () => currentProject.name, set: value => { currentProject.name = value; } },
+    cables: { configurable: true, get: () => currentProject.cables, set: value => { currentProject.cables = value; } }
+  });
+  floor.assets = initializePorts(assignRacks(floor.assets), currentProject.cables);
+}
+selectFloor();
+function allFloors() { return currentProject.buildings.flatMap(b => b.floors.map(f => ({ building: b, floor: f }))); }
+function allAssets() { return allFloors().flatMap(({ floor }) => floor.assets); }
+function assetLocation(id) { return allFloors().find(({ floor }) => floor.assets.some(a => a.id === id)); }
+function globalAsset(id) { return allAssets().find(a => a.id === id); }
+function locationName(id) { const at = assetLocation(id); return at ? `${at.building.name} / ${at.floor.floorName}` : 'Unknown'; }
+function crossFloor(cable) { return assetLocation(cable.from)?.floor !== assetLocation(cable.to)?.floor; }
+function blankFloor(name = 'Ground floor') { return { id: uid(), floorName: name, planImage: '', demo: false, zones: [], assets: [] }; }
+function resetSelection() { selected = { kind: null, id: null }; inspectorOpen = false; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; closeDialogs(); setMode('select'); }
 let rackView = '', rackDevice = '', pendingPort = null;
 let selected = { kind: null, id: null };
 const defaultZoom = 1.1;
@@ -49,7 +78,7 @@ function toast(message, duration = 3500) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => element.classList.remove('visible'), duration);
 }
 function save() {
-  try { localStorage.setItem(storageKey, JSON.stringify(project)); $('#save-status').textContent = 'Saved locally'; return true; }
+  try { localStorage.setItem(workspaceKey, JSON.stringify(workspace)); $('#save-status').textContent = 'Saved locally'; return true; }
   catch { $('#save-status').textContent = 'Not saved — export project'; toast('Browser storage is full. Export your project to avoid losing changes.', 8000); return false; }
 }
 function assetById(id) { return project.assets.find(asset => asset.id === id); }
@@ -64,6 +93,10 @@ function setMode(next, message) {
 }
 
 function render() {
+  $('#project-select').innerHTML = workspace.projects.map((p, i) => `<option value="${i}" ${i === workspace.projectIndex ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  $('#building-select').innerHTML = currentProject.buildings.map((b, i) => `<option value="${i}" ${i === workspace.buildingIndex ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
+  $('#floor-select').innerHTML = building.floors.map((f, i) => `<option value="${i}" ${i === workspace.floorIndex ? 'selected' : ''}>${esc(f.floorName)}</option>`).join('');
+  $('#floor-eyebrow').textContent = project.floorName.toUpperCase();
   $('#sidebar-project').textContent = project.name;
   $('#project-kind').textContent = project.demo ? 'Example project · local' : 'Local project';
   $('#breadcrumb-project').textContent = project.name;
@@ -84,9 +117,9 @@ function renderInspector() {
   $('.inspector').hidden = !inspectorOpen || (!asset && !cable);
   if (asset) {
     const url = safeManagementUrl(asset.managementUrl);
-    target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.rackId ? 'In rack' : asset.placed ? 'Placed on plan' : 'Ready to place'}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label>${asset.type !== 'cabinet' && asset.type !== 'access_point' ? `<label class="field"><span>Cabinet / rack</span><select name="rackId"><option value="">Unassigned</option>${project.assets.filter(a => a.type === 'cabinet').map(a => `<option value="${esc(a.id)}" ${asset.rackId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>` : ''}<label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label><label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label></form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions">${!asset.rackId ? `<button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button>` : ''}${asset.type === 'cabinet' ? `<button class="detail-button" data-rack-open="${esc(asset.id)}">${icon('layers')} Open rack view</button>` : ''}<button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
+    target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.rackId ? 'In rack' : asset.placed ? 'Placed on plan' : 'Ready to place'}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label>${asset.type !== 'cabinet' && asset.type !== 'access_point' ? `<label class="field"><span>Cabinet / rack</span><select name="rackId"><option value="">Unassigned</option>${project.assets.filter(a => a.type === 'cabinet').map(a => `<option value="${esc(a.id)}" ${asset.rackId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>` : ''}<label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label><label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label></form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions">${!asset.rackId ? `<button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button>` : ''}${asset.type === 'cabinet' ? `<button class="detail-button" data-rack-open="${esc(asset.id)}">${icon('layers')} Open rack view</button>` : ''}<button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button><label class="field"><span>Connect to another floor</span><select id="cross-floor-connect"><option value="">Choose equipment</option>${allAssets().filter(a => a.id !== asset.id && assetLocation(a.id)?.floor !== floor).map(a => `<option value="${esc(a.id)}">${esc(a.name)} · ${esc(locationName(a.id))}</option>`).join('')}</select></label>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
   } else if (cable) {
-    target.innerHTML = `<div class="inspector-eyebrow">SELECTED CABLE</div><h3>${esc(assetById(cable.from)?.name)} → ${esc(assetById(cable.to)?.name)}</h3><p class="detail-note">Click a segment to add a point. Drag points onto the grid, or focus a point and use arrow keys. Delete removes it.</p><div class="detail-actions"><button class="detail-button" data-action="add-point">Add point</button><button class="detail-button" data-action="remove-point" ${pointIndex === null ? 'disabled' : ''}>Remove selected point</button><button class="detail-button" data-action="reset-route">Reset automatic route</button></div>`;
+    target.innerHTML = `<div class="inspector-eyebrow">SELECTED CABLE</div><h3>${esc(globalAsset(cable.from)?.name)} → ${esc(globalAsset(cable.to)?.name)}</h3>${crossFloor(cable) ? `<p class="detail-note">${esc(locationName(cable.from))} → ${esc(locationName(cable.to))}</p><p class="detail-note">Cross-floor connection; physical route is not shown.</p>` : `<p class="detail-note">Click a segment to add a point. Drag points onto the grid, or focus a point and use arrow keys. Delete removes it.</p><div class="detail-actions"><button class="detail-button" data-action="add-point">Add point</button><button class="detail-button" data-action="remove-point" ${pointIndex === null ? 'disabled' : ''}>Remove selected point</button><button class="detail-button" data-action="reset-route">Reset automatic route</button></div>`}`;
   } else {
     target.innerHTML = `<div class="empty-inspector">${icon('layers')}<h3>Nothing selected</h3><p>Select equipment on the floor plan to see its details.</p></div>`;
   }
@@ -169,7 +202,7 @@ function renderScene() {
   out += poly(floor, '#f1f5ed', 'stroke="#b9cbbb" stroke-width="1.5" data-floor="true"');
   if (project.planImage) out += `<image href="${esc(project.planImage)}" x="0" y="0" width="100" height="100" preserveAspectRatio="none" transform="matrix(${matrix})" opacity=".8" pointer-events="none"/>`;
   out += demoFurniture() + demoWalls();
-  const editing = selectedCable();
+  const editing = selectedCable() && !crossFloor(selectedCable()) ? selectedCable() : null;
   if (editing) {
     out += '<g class="route-editor" pointer-events="none">';
     for (let x = 0; x <= 100; x += 5) for (let y = 0; y <= 100; y += 5) {
@@ -189,6 +222,14 @@ function renderScene() {
       out += `<polyline class="route-hit" data-cable-hit="${esc(cable.id)}" data-segment="${i}" points="${segment}" fill="none" stroke="transparent" stroke-width="16"/>`;
     });
   }
+  for (const cable of project.cables.filter(crossFloor)) {
+    const local = assetById(cable.from) || assetById(cable.to);
+    const marker = assetById(local?.rackId) || local;
+    if (!marker?.placed) continue;
+    const [x, y] = point(marker.x, marker.y);
+    const other = local.id === cable.from ? cable.to : cable.from;
+    out += `<g data-cable="${esc(cable.id)}" tabindex="0" role="button" aria-label="Connection to ${esc(globalAsset(other)?.name)} on ${esc(locationName(other))}"><circle cx="${round(x + 18)}" cy="${round(y - 20)}" r="8" fill="${esc(cable.color || '#d9a667')}" stroke="#fff" stroke-width="2"/><title>Connected to ${esc(globalAsset(other)?.name)} · ${esc(locationName(other))}</title></g>`;
+  }
   out += project.assets.filter(a => a.placed && !a.rackId).sort((a,b) => { const [ax,ay] = rotated(a.x,a.y), [bx,by] = rotated(b.x,b.y); return ax+ay-bx-by; }).map(assetShape).join('');
   if (editing) (editing.waypoints || []).forEach((p, i) => { const [x,y] = point(p.x,p.y); out += `<circle class="route-handle route-editor" data-point="${i}" tabindex="0" role="button" aria-label="Cable point ${i + 1}, x ${p.x}, y ${p.y}" cx="${round(x)}" cy="${round(y)}" r="${i === pointIndex ? 7 : 5}" fill="#fff" stroke="#a66524" stroke-width="2"/>`; });
   scene.innerHTML = out;
@@ -196,7 +237,7 @@ function renderScene() {
 
 function closeDialogs() { pendingPort = null; document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
 function showConnections() {
-  $('#connection-list').innerHTML = project.cables.map(cable => `<div class="inventory-row"><span class="inventory-asset-icon">${icon('link')}</span><div><button class="cable-select" data-cable-select="${esc(cable.id)}"><strong>${esc(assetById(cable.from)?.name || 'Unknown')} → ${esc(assetById(cable.to)?.name || 'Unknown')}</strong><small>Edit cable route</small></button></div><button class="tool-button" data-remove-cable="${esc(cable.id)}" title="Remove cable" aria-label="Remove cable">${icon('trash')}</button></div>`).join('') || '<p class="detail-note">There are no cables in this project yet.</p>';
+  $('#connection-list').innerHTML = project.cables.map(cable => `<div class="inventory-row"><span class="inventory-asset-icon">${icon('link')}</span><div><button class="cable-select" data-cable-select="${esc(cable.id)}"><strong>${esc(globalAsset(cable.from)?.name || 'Unknown')} → ${esc(globalAsset(cable.to)?.name || 'Unknown')}</strong><small>${esc(locationName(cable.from))} → ${esc(locationName(cable.to))}</small></button></div><button class="tool-button" data-remove-cable="${esc(cable.id)}" title="Remove cable" aria-label="Remove cable">${icon('trash')}</button></div>`).join('') || '<p class="detail-note">There are no cables in this project yet.</p>';
   closeDialogs(); $('#connections-dialog').showModal();
 }
 function drawRackCables() {
@@ -232,7 +273,7 @@ function rackColorControl(deviceId, portName) {
 function showRacks(id = '', deviceId = '', portName = '') {
   if (rackView !== id) pendingPort = null;
   rackView = id; rackDevice = deviceId;
-  initializePorts(project.assets, project.cables);
+  initializePorts(allAssets(), project.cables);
   const rack = assetById(id);
   $('#rack-title').textContent = rack?.name || 'Racks';
   $('#rack-description').textContent = rack ? 'Double-click a free port to connect it, or a connected port to remove its connection.' : 'Choose a rack to see its devices.';
@@ -241,7 +282,7 @@ function showRacks(id = '', deviceId = '', portName = '') {
     content.innerHTML = project.assets.filter(a => a.type === 'cabinet').map(a => `<button class="inventory-row" data-rack-open="${esc(a.id)}"><span class="inventory-asset-icon">${icon('layers')}</span><div><strong>${esc(a.name)}</strong><small>${project.assets.filter(d => d.rackId === a.id).length} devices</small></div>${icon('chevron')}</button>`).join('') || '<p class="detail-note">Add a cabinet to get started.</p>';
   } else {
     const devices = project.assets.filter(a => a.rackId === rack.id);
-    content.innerHTML = `<button class="text-button" data-rack-open="">← All racks</button><p class="rack-connect-hint" role="status">${pendingPort ? `Selected ${esc(assetById(pendingPort.device)?.name)} · ${esc(pendingPort.port)}. Choose a destination below or double-click another port. <button class="text-button" data-action="cancel-port">Cancel</button>` : 'Double-click a free port to connect it, or a connected port to remove its connection. Keyboard: focus a port and press Enter.'}</p><div class="rack-frame"><svg id="rack-cables" aria-hidden="true"></svg>${devices.map(a => `<div class="rack-panel rack-${esc(a.type)} ${a.id === deviceId ? 'active' : ''}"><div class="rack-bezel"><span class="rack-brand">${a.type === 'switch' ? 'FORTISWITCH' : a.type === 'firewall' ? 'FORTIGATE' : esc(typeName(a.type).toUpperCase())}</span><span class="rack-leds" aria-hidden="true">● ● ●</span><button class="rack-device-name" data-rack-device="${esc(a.id)}"><strong>${esc(a.name)}</strong><small>${esc(a.model || typeName(a.type))}</small></button></div><div class="panel-ports">${a.ports.map(p => `<button class="rack-port ${pendingPort?.device === a.id && pendingPort.port === p.name ? 'armed' : ''} ${a.id === deviceId && p.name === portName ? 'active' : ''} ${project.cables.some(c => (c.from === a.id && c.fromPort === p.name) || (c.to === a.id && c.toPort === p.name)) ? 'connected' : ''}" ${portColor(a.id, p.name)} data-port-device="${esc(a.id)}" data-port-name="${esc(p.name)}" title="${esc(p.name)} · ${esc(p.speed)}" aria-label="${esc(a.name)}, port ${esc(p.name)}, ${esc(p.speed)}">${esc(p.name)}</button>`).join('')}</div></div>`).join('') || '<p class="detail-note">No devices assigned to this rack.</p>'}</div><div class="rack-controls">${pendingPort ? `<label class="field rack-color"><span>Connection colour</span><input type="color" id="connection-color" value="${esc(pendingPort.color || '#d9a667')}"></label><label class="field"><span>Connect ${esc(assetById(pendingPort.device)?.name)} · ${esc(pendingPort.port)} to</span><select id="connect-to"><option value="">Choose a device and port</option>${project.assets.filter(a => a.id !== pendingPort.device && a.type !== 'cabinet').map(a => a.ports.filter(p => !project.cables.some(c => (c.from === a.id && c.fromPort?.toLowerCase() === p.name.toLowerCase()) || (c.to === a.id && c.toPort?.toLowerCase() === p.name.toLowerCase()))).map(p => `<option value="${esc(JSON.stringify([a.id, p.name]))}">${esc(a.name)} · ${esc(p.name)}</option>`).join('')).join('')}</select></label>` : rackColorControl(deviceId, portName)}</div>`;
+    content.innerHTML = `<button class="text-button" data-rack-open="">← All racks</button><p class="rack-connect-hint" role="status">${pendingPort ? `Selected ${esc(assetById(pendingPort.device)?.name)} · ${esc(pendingPort.port)}. Choose a destination below or double-click another port. <button class="text-button" data-action="cancel-port">Cancel</button>` : 'Double-click a free port to connect it, or a connected port to remove its connection. Keyboard: focus a port and press Enter.'}</p><div class="rack-frame"><svg id="rack-cables" aria-hidden="true"></svg>${devices.map(a => `<div class="rack-panel rack-${esc(a.type)} ${a.id === deviceId ? 'active' : ''}"><div class="rack-bezel"><span class="rack-brand">${a.type === 'switch' ? 'FORTISWITCH' : a.type === 'firewall' ? 'FORTIGATE' : esc(typeName(a.type).toUpperCase())}</span><span class="rack-leds" aria-hidden="true">● ● ●</span><button class="rack-device-name" data-rack-device="${esc(a.id)}"><strong>${esc(a.name)}</strong><small>${esc(a.model || typeName(a.type))}</small></button></div><div class="panel-ports">${a.ports.map(p => `<button class="rack-port ${pendingPort?.device === a.id && pendingPort.port === p.name ? 'armed' : ''} ${a.id === deviceId && p.name === portName ? 'active' : ''} ${project.cables.some(c => (c.from === a.id && c.fromPort === p.name) || (c.to === a.id && c.toPort === p.name)) ? 'connected' : ''}" ${portColor(a.id, p.name)} data-port-device="${esc(a.id)}" data-port-name="${esc(p.name)}" title="${esc(p.name)} · ${esc(p.speed)}" aria-label="${esc(a.name)}, port ${esc(p.name)}, ${esc(p.speed)}">${esc(p.name)}</button>`).join('')}</div></div>`).join('') || '<p class="detail-note">No devices assigned to this rack.</p>'}</div><div class="rack-controls">${pendingPort ? `<label class="field rack-color"><span>Connection colour</span><input type="color" id="connection-color" value="${esc(pendingPort.color || '#d9a667')}"></label><label class="field"><span>Connect ${esc(assetById(pendingPort.device)?.name)} · ${esc(pendingPort.port)} to</span><select id="connect-to"><option value="">Choose a device and port</option>${allAssets().filter(a => a.id !== pendingPort.device && a.type !== 'cabinet').map(a => a.ports.filter(p => !project.cables.some(c => (c.from === a.id && c.fromPort?.toLowerCase() === p.name.toLowerCase()) || (c.to === a.id && c.toPort?.toLowerCase() === p.name.toLowerCase()))).map(p => `<option value="${esc(JSON.stringify([a.id, p.name]))}">${esc(a.name)} · ${esc(locationName(a.id))} · ${esc(p.name)}</option>`).join('')).join('')}</select></label>` : rackColorControl(deviceId, portName)}</div>`;
   }
   if (!$('#rack-dialog').open) { closeDialogs(); $('#rack-dialog').showModal(); }
   requestAnimationFrame(drawRackCables);
@@ -250,7 +291,17 @@ function chooseAsset(id) {
   selected = { kind: 'asset', id }; inspectorOpen = true; setMode('select'); closeDialogs(); render();
   if (assetById(id)?.type === 'cabinet') showRacks(id);
 }
-function chooseCable(id) { selected = { kind: 'cable', id }; pointIndex = null; inspectorOpen = true; setMode('select'); closeDialogs(); render(); }
+function chooseCable(id) {
+  const cable = currentProject.cables.find(c => c.id === id);
+  if (!cable) return;
+  if (!assetById(cable.from) && !assetById(cable.to)) {
+    const at = assetLocation(cable.from);
+    workspace.buildingIndex = currentProject.buildings.indexOf(at.building);
+    workspace.floorIndex = at.building.floors.indexOf(at.floor);
+    selectFloor(); resetSelection(); save();
+  }
+  selected = { kind: 'cable', id }; pointIndex = null; inspectorOpen = true; setMode('select'); closeDialogs(); render();
+}
 function download(name, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
@@ -308,7 +359,7 @@ function zoomAt(value, x, y) {
   const before = svgPosition(x, y); zoom = Math.max(.6, Math.min(1.8, value)); renderScene();
   const after = svgPosition(x, y); pan.x += before.x - after.x; pan.y += before.y - after.y; render();
 }
-$('#scene').addEventListener('wheel', event => { if (event.ctrlKey || event.metaKey) return; event.preventDefault(); zoomAt(zoom * Math.exp(-event.deltaY * .001), event.clientX, event.clientY); }, { passive: false });
+$('#scene').addEventListener('wheel', event => { event.preventDefault(); const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? $('#scene').clientHeight : 1); zoomAt(zoom * Math.exp(-delta * .001), event.clientX, event.clientY); }, { passive: false });
 $('#scene').addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -378,7 +429,7 @@ $('#scene').addEventListener('keydown', event => {
 });
 
 function connectRackPort(device, port) {
-  const source = pendingPort && assetById(pendingPort.device), target = assetById(device);
+  const source = pendingPort && assetById(pendingPort.device), target = globalAsset(device);
   const free = (id, name) => !project.cables.some(c => (c.from === id && c.fromPort?.toLowerCase() === name.toLowerCase()) || (c.to === id && c.toPort?.toLowerCase() === name.toLowerCase()));
   if (!source || !target || source.id === target.id || !source.ports.some(p => p.name === pendingPort.port) || !target.ports.some(p => p.name === port) || !free(source.id, pendingPort.port) || !free(device, port)) { toast('Choose a free port on a different device.'); return; }
   project.cables.push({ id: uid(), from: source.id, fromPort: pendingPort.port, to: device, toPort: port, waypoints: [], label: '', color: pendingPort.color || '#d9a667' });
@@ -458,7 +509,7 @@ document.addEventListener('click', event => {
     case 'zoom-in': zoom = Math.min(1.8, round(zoom + .2)); render(); break;
     case 'zoom-out': zoom = Math.max(.6, round(zoom - .2)); render(); break;
     case 'reset-view': rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; render(); break;
-    case 'export-project': download(`${projectFilename()}.json`, JSON.stringify(project, null, 2), 'application/json'); toast('Project exported.'); break;
+    case 'export-project': download(`${projectFilename()}.json`, JSON.stringify(currentProject, null, 2), 'application/json'); toast('Project exported.'); break;
     case 'export-svg': {
       const copy = $('#scene').cloneNode(true); copy.querySelectorAll('.route-editor, .route-hit').forEach(node => node.remove()); copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); copy.setAttribute('font-family', 'Inter, Arial, sans-serif');
       download(`${projectFilename()}-floor-plan.svg`, new XMLSerializer().serializeToString(copy), 'image/svg+xml'); toast('Diagram exported as SVG.'); break;
@@ -468,17 +519,39 @@ document.addEventListener('click', event => {
       if (name) { project.name = name.slice(0, 80); save(); render(); }
       break;
     }
-    case 'new-project':
-      if (confirm('Start a blank project? Export the current project first if you want to keep a backup.')) {
-        project = { name: 'Untitled project', floorName: 'Ground floor', planImage: '', demo: false, zones: [], assets: [], cables: [] };
-        selected = { kind: 'asset', id: null }; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Blank project created. Upload a floor plan and add equipment.');
-      }
-      break;
+    case 'new-project': {
+      const name = prompt('Project name', 'Untitled project')?.trim(); if (!name) break;
+      workspace.projects.push({ name: name.slice(0, 80), buildings: [{ id: uid(), name: 'Building 1', floors: [blankFloor()] }], cables: [] });
+      workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); break;
+    }
+    case 'new-building': {
+      const name = prompt('Building name', 'New building')?.trim(); if (!name) break;
+      currentProject.buildings.push({ id: uid(), name: name.slice(0, 80), floors: [blankFloor()] });
+      workspace.buildingIndex = currentProject.buildings.length - 1; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); break;
+    }
+    case 'new-floor': {
+      const name = prompt('Floor name', 'New floor')?.trim(); if (!name) break;
+      building.floors.push(blankFloor(name.slice(0, 80))); workspace.floorIndex = building.floors.length - 1; selectFloor(); resetSelection(); save(); render(); break;
+    }
+    case 'rename-building': { const name = prompt('Building name', building.name)?.trim(); if (name) { building.name = name.slice(0, 80); save(); render(); } break; }
+    case 'rename-floor': { const name = prompt('Floor name', floor.floorName)?.trim(); if (name) { floor.floorName = name.slice(0, 80); save(); render(); } break; }
+
   }
 });
 
 document.addEventListener('change', event => {
   const field = event.target, asset = selectedAsset();
+  if (['project-select', 'building-select', 'floor-select'].includes(field.id)) {
+    if (field.id === 'project-select') { workspace.projectIndex = Number(field.value); workspace.buildingIndex = 0; workspace.floorIndex = 0; }
+    if (field.id === 'building-select') { workspace.buildingIndex = Number(field.value); workspace.floorIndex = 0; }
+    if (field.id === 'floor-select') workspace.floorIndex = Number(field.value);
+    selectFloor(); resetSelection(); save(); render(); return;
+  }
+  if (field.id === 'cross-floor-connect' && field.value && asset) {
+    const target = globalAsset(field.value);
+    if (!target || project.cables.some(c => (c.from === asset.id && c.to === target.id) || (c.to === asset.id && c.from === target.id))) { toast('These items are already connected.'); render(); return; }
+    project.cables.push({ id: uid(), from: asset.id, to: target.id, waypoints: [] }); save(); render(); toast(`Connected ${asset.name} to ${target.name}.`); return;
+  }
   if (field.id === 'connection-color') {
     if (pendingPort && !field.dataset.cableId) pendingPort.color = field.value;
     else { const cable = project.cables.find(c => c.id === field.dataset.cableId); if (cable) { cable.color = field.value; save(); showRacks(rackView, field.dataset.deviceId, field.dataset.portName); render(); } }
@@ -516,22 +589,21 @@ $('#inventory-file').addEventListener('change', async event => {
 });
 $('#plan-file').addEventListener('change', async event => {
   const file = event.target.files[0]; if (!file) return;
+  const targetFloor = floor;
   try {
     if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP floor plan.');
     if (file.size > 2_000_000) throw new Error('Floor plan must be smaller than 2 MB for browser storage.');
     const image = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read the floor plan.')); reader.readAsDataURL(file); });
-    project.planImage = image; project.demo = false; save(); render(); toast('Floor plan uploaded.');
+    targetFloor.planImage = image; targetFloor.demo = false; save(); render(); toast('Floor plan uploaded.');
   } catch (error) { alert(error.message); }
   event.target.value = '';
 });
 $('#project-file').addEventListener('change', async event => {
   const file = event.target.files[0]; if (!file) return;
   try {
-    if (file.size > 5_000_000) throw new Error('Project file must be smaller than 5 MB.');
-    const imported = restoreProject(JSON.parse(await file.text()));
-    if (confirm('Replace the current project with this file? Export the current project first if you need a backup.')) {
-      project = imported; selected = { kind: null, id: null }; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; setMode('select'); save(); render(); toast('Project imported.');
-    }
+    if (file.size > 50_000_000) throw new Error('Project file must be smaller than 50 MB.');
+    const imported = restoreHierarchy(JSON.parse(await file.text()));
+    workspace.projects.push(imported); workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); toast('Project imported.');
   } catch (error) { alert(`Could not import project: ${error.message}`); }
   event.target.value = '';
 });

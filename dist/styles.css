@@ -56,3 +56,4 @@
 
 #scene { cursor: grab; }
 #scene.dragging { cursor: grabbing; }
+.sidebar .field{margin:10px 4px 3px}.sidebar .field>span{color:#c1d0c6}.sidebar .field select{width:100%;background:#fff}.sidebar-content>.text-button{color:#c4e3ce;margin:0 4px 10px}

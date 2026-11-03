@@ -127,3 +127,17 @@ test('rack assignment works without zones when there is a single cabinet', async
   assert.equal(assignRacks([...assets, { id: 'r2', type: 'cabinet' }])[1].rackId, '');
   assert.equal(assignRacks([{ ...assets[1], rackId: '' }, assets[0]])[0].rackId, '');
 });
+
+test('project hierarchy migrates legacy data and validates cross-floor connections', async () => {
+  const { restoreHierarchy } = await import('../dist/model.js');
+  const old = { name: 'Office', floorName: 'Ground', zones: [], assets: [{ id: 'a', name: 'A', type: 'switch', placed: false }], cables: [] };
+  const migrated = restoreHierarchy(old);
+  assert.equal(migrated.buildings[0].floors[0].floorName, 'Ground');
+  assert.equal(migrated.buildings[0].floors[0].assets[0].id, 'a');
+  const floor = { id: 'f2', floorName: 'Upper', zones: [], assets: [{ id: 'b', name: 'B', type: 'switch', placed: false }] };
+  migrated.buildings[0].floors.push(floor);
+  migrated.cables.push({ id: 'c', from: 'a', to: 'b', fromPort: '1', toPort: '2', waypoints: [] });
+  const restored = restoreHierarchy(JSON.parse(JSON.stringify(migrated)));
+  assert.equal(restored.cables[0].to, 'b');
+  assert.throws(() => restoreHierarchy({ ...migrated, cables: [{ id: 'x', from: 'a', to: 'missing' }] }), /invalid/i);
+});
