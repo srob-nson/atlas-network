@@ -1,9 +1,9 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=12';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=13';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
-const typeName = type => ({ cabinet: 'Cabinet', switch: 'Switch', router: 'Router', firewall: 'Firewall', access_point: 'Access point', patch_panel: 'Patch panel' })[type] || type;
+const typeName = type => ({ cabinet: 'Cabinet', switch: 'Switch', router: 'Router', firewall: 'Firewall', access_point: 'Access point', patch_panel: 'Patch panel', plc: 'PLC', rtu: 'RTU', hmi: 'HMI', engineering_workstation: 'Engineering workstation', server: 'Server', workstation: 'Workstation', ip_camera: 'IP camera', nvr: 'Network video recorder', access_controller: 'Access controller', sensor: 'Sensor', meter: 'Meter', drive: 'Drive', ied: 'IED', gateway: 'Gateway', printer: 'Printer', other: 'Other IP device' })[type] || type;
 const typeIcon = type => type === 'access_point' ? 'nodes' : type === 'cabinet' ? 'layers' : 'box';
 const uid = () => crypto.randomUUID();
 const storageKey = 'titan-project-v1';

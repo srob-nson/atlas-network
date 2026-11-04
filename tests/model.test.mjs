@@ -4,12 +4,20 @@ import { parseInventory, autoPlace, safeManagementUrl, restoreProject, placeAsse
 
 test('inventory import accepts quoted fields, matches zones, and reports unsupported types', () => {
   const zones = [{ id: 'z1', name: 'Network Room' }];
-  const result = parseInventory('name,type,zone,ip,management_url\n"Core, A",switch,Network Room,10.0.0.1,https://10.0.0.1\nUnknown,printer,Network Room,,', zones);
+  const result = parseInventory('name,type,zone,ip,management_url\n"Core, A",switch,Network Room,10.0.0.1,https://10.0.0.1\nUnknown,spaceship,Network Room,,', zones);
   assert.equal(result.assets.length, 1);
   assert.equal(result.assets[0].name, 'Core, A');
   assert.equal(result.assets[0].zoneId, 'z1');
   assert.equal(result.assets[0].managementUrl, 'https://10.0.0.1/');
-  assert.match(result.errors[0], /printer/i);
+  assert.match(result.errors[0], /spaceship/i);
+});
+
+test('OT endpoints import and restore without being automatically put in a rack', () => {
+  const imported = parseInventory('name,type,ip\nCamera,ip_camera,10.0.0.5\nController,plc,10.0.0.6\nOther,other,10.0.0.7', []);
+  assert.deepEqual(imported.errors, []);
+  const restored = restoreProject({ name: 'OT', zones: [], assets: [{ id: 'rack', name: 'Rack', type: 'cabinet' }, ...imported.assets], cables: [] });
+  assert.deepEqual(restored.assets.slice(1).map(a => [a.type, a.rackId, a.ports.length]), [['ip_camera', '', 1], ['plc', '', 1], ['other', '', 1]]);
+  assert.equal(restoreProject(JSON.parse(JSON.stringify(restored))).assets[1].ip, '10.0.0.5');
 });
 
 test('automatic placement uses the assigned zone without moving placed equipment', () => {

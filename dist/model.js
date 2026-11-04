@@ -1,4 +1,4 @@
-export const TYPES = ['cabinet', 'switch', 'router', 'firewall', 'access_point', 'patch_panel'];
+export const TYPES = ['cabinet', 'switch', 'router', 'firewall', 'access_point', 'patch_panel', 'plc', 'rtu', 'hmi', 'engineering_workstation', 'server', 'workstation', 'ip_camera', 'nvr', 'access_controller', 'sensor', 'meter', 'drive', 'ied', 'gateway', 'printer', 'other'];
 
 export function placeAsset(asset, zones, x, y) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new TypeError('Position must be finite.');
@@ -67,6 +67,7 @@ export function assignRacks(assets) {
   return assets.map(asset => {
     if (asset.type === 'cabinet' || asset.type === 'access_point') return { ...asset, rackId: '' };
     if (asset.rackId !== undefined) return { ...asset };
+    if (!['switch', 'router', 'firewall', 'patch_panel'].includes(asset.type)) return { ...asset, rackId: '' };
     const cabinets = assets.filter(a => a.type === 'cabinet');
     const rack = cabinets.find(a => a.zoneId && a.zoneId === asset.zoneId) || (cabinets.length === 1 ? cabinets[0] : null);
     return { ...asset, rackId: rack?.id || '' };
@@ -74,7 +75,7 @@ export function assignRacks(assets) {
 }
 
 export function defaultPorts(type) {
-  const count = type === 'switch' || type === 'patch_panel' ? 48 : type === 'router' || type === 'firewall' ? 4 : type === 'access_point' ? 1 : 0;
+  const count = type === 'switch' || type === 'patch_panel' ? 48 : type === 'router' || type === 'firewall' ? 4 : type === 'cabinet' ? 0 : 1;
   return Array.from({ length: count }, (_, i) => ({ name: String(i + 1), speed: '1 Gbps' }));
 }
 
