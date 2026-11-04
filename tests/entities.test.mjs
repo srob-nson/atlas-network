@@ -37,7 +37,7 @@ test('legacy connections retain unresolved endpoints and versioned entities roun
   ], cables: [{ id: 'c1', from: 'a', fromPort: 'Gi1', to: 'b', toPort: 'WAN' }, { id: 'c2', from: 'a', to: 'b' }] };
   const project = restoreHierarchy(legacy);
   const data = serializeProject(project);
-  assert.equal(data.schemaVersion, 2);
+  assert.equal(data.schemaVersion, 3);
   assert.equal(data.devices.length, 2);
   assert.equal(data.ports.length, 2);
   assert.ok(data.connections[0].from.portId);
@@ -79,4 +79,24 @@ test('migration rejects invalid port IDs instead of writing an unreadable projec
   legacy.cables[0].fromPortId = 'pa';
   legacy.assets[1].ports[0].id = 'pa';
   assert.throws(() => restoreHierarchy(legacy), /invalid/i);
+});
+
+test('engineering metadata survives export and old version 2 projects migrate with unknown values', () => {
+  const project = restoreHierarchy({ name: 'Engineering', zones: [], assets: [
+    { id: 'a', name: 'Switch', type: 'switch', network: 'OT', vrf: 'prod', poeBudget: 0, ports: [{ id: 'p', name: '1', speed: '1 Gbps', media: 'copper', poe: 'source' }] }
+  ], cables: [] });
+  const exported = serializeProject(project);
+  const device = exported.devices[0];
+  assert.deepEqual([device.network, device.vrf, device.poeBudget], ['OT', 'prod', 0]);
+  assert.equal(exported.ports[0].poe, 'source');
+  assert.deepEqual(serializeProject(restoreHierarchy(exported)), exported);
+  const old = structuredClone(exported); old.schemaVersion = 2;
+  delete old.devices[0].network; delete old.devices[0].vrf; delete old.devices[0].poeBudget; delete old.ports[0].poe;
+  const migrated = serializeProject(restoreHierarchy(old));
+  assert.equal(migrated.devices[0].poeBudget, null);
+  assert.equal(migrated.ports[0].poe, 'unknown');
+  const invalid = structuredClone(exported); invalid.devices[0].poeBudget = -1;
+  assert.throws(() => restoreHierarchy(invalid), /invalid/i);
+  invalid.devices[0].poeBudget = 0; invalid.ports[0].poe = 'invented';
+  assert.throws(() => restoreHierarchy(invalid), /invalid/i);
 });

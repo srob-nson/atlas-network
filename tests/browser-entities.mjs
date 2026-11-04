@@ -34,7 +34,7 @@ await field('#connect-to', '["b","1"]');
 await wait(300);
 const stored = await evaluate(`new Promise((resolve, reject) => { const open = indexedDB.open('titan-workspace'); open.onerror = reject; open.onsuccess = () => { const db = open.result, tx = db.transaction('workspace'), get = tx.objectStore('workspace').get('current'); tx.oncomplete = () => { db.close(); resolve(get.result); }; tx.onerror = reject; }; })`);
 const project = stored.projects[0];
-assert.equal(project.schemaVersion, 2);
+assert.equal(project.schemaVersion, 3);
 assert.equal(project.devices.find(d => d.id === 'a').vendor, 'Example Networks');
 assert.equal(project.ports.filter(p => p.deviceId === 'a').length, 24);
 assert.equal(project.devices.find(d => d.id === 'b').rackStart, 3);

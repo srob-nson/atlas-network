@@ -21,7 +21,7 @@ export function browserEvaluate(send) {
       await new Promise(resolve => setTimeout(resolve, 50));
       await run(`new Promise((resolve, reject) => { const deadline = Date.now() + 5000; const check = () => { if (document.querySelector('#save-status')?.textContent !== 'Saving…') resolve(); else if (Date.now() > deadline) reject(new Error('Save timed out')); else setTimeout(check, 10); }; check(); })`);
       const value = await read();
-      if (value?.projects) value.projects = value.projects.map(project => project.schemaVersion === 2 ? restoreHierarchy(project) : project);
+      if (value?.projects) value.projects = value.projects.map(project => project.schemaVersion >= 2 ? restoreHierarchy(project) : project);
       expression = expression.replace(/localStorage\.getItem\(['"]titan-workspace-v2['"]\)/g, JSON.stringify(value === null ? null : JSON.stringify(value)));
     }
     return run(expression);

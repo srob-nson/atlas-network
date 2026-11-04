@@ -28,3 +28,11 @@ Select a cable on the plan or in Connections to edit its route. Click a segment 
 Set a rack's capacity in U in its equipment details. For a device, enter its starting U and height, then choose the rack. Assignments cannot overlap or exceed capacity. Older assignments with unknown positions remain assigned. If several devices have unknown positions, unassign the others while setting the first position, then reassign them. Racked devices are hidden on the floor plan; cables to other locations terminate at the cabinet. Open **Racks** in the sidebar or select a cabinet on the floor plan to see devices and their U positions.
 
 Set the number of ports in device details, then edit each interface name, speed and media. New devices have no assumed interfaces; connected ports cannot be removed by reducing the count. Double-click a free port in a rack, then choose a device and port from **Connect to**, or double-click another free port in the rack. Choose a colour before connecting, or select a connected port to change its colour. Double-click either connected port to remove the connection. Keyboard users can focus a port and press Enter. Connections within a rack are drawn between ports.
+
+### Engineering validation
+
+Choose **Validate design** to review errors, warnings and missing information. Select a finding's links to open the affected device, interface, rack or connection. Run validation again after editing to refresh the findings.
+
+Set the network and VRF names in equipment details; duplicate IP addresses are compared only when both names are specified and match exactly. Use an explicit name such as `default` for a default VRF. Missing IP, network or VRF values are reported as missing information.
+
+For each interface, enter its speed with units, media and PoE role. Titan compares recognized copper and fiber media, and warns when declared speeds differ because negotiation may still be possible. Unrecognized or missing values are reported as unknown. For PoE, set the supplying and powered interface roles, the supplying device's budget in watts and the powered device's demand in watts. The total counts each powered device once per source; a device with multiple sources has an unknown load split. These checks do not model PoE classes, power loss, supported speed ranges or physical cable suitability.

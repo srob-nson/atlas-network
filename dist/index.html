@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f7f6">
   <meta name="description" content="Plan, visualize, and document network infrastructure in context.">
   <title>Titan — Spatial network design</title>
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -47,6 +47,7 @@
         <button class="side-nav" data-action="inventory"><svg><use href="#i-box"/></svg><span>Equipment</span><span class="nav-count" id="side-asset-count">0</span></button>
         <button class="side-nav" data-action="show-racks"><svg><use href="#i-layers"/></svg><span>Racks</span><span class="nav-count" id="side-rack-count">0</span></button>
         <button class="side-nav" data-action="show-connections"><svg><use href="#i-nodes"/></svg><span>Connections</span><span class="nav-count" id="side-cable-count">0</span></button>
+        <button class="side-nav" data-action="show-validation"><svg><use href="#i-check"/></svg><span>Validate design</span></button>
       </div>
       <div class="sidebar-bottom"><div class="tip-icon"><svg><use href="#i-image"/></svg></div><div><strong>Floor plan</strong><p>Upload a plan to work with your own space.</p><button data-action="upload-plan">Upload floor plan <span>↗</span></button></div></div>
     </aside>
@@ -72,8 +73,9 @@
   <dialog id="inventory-dialog" class="inventory-dialog"><div class="dialog-header"><div><div class="section-kicker">PROJECT INVENTORY</div><h2>Equipment</h2><p>Equipment across all buildings and floors in this project. Select an item to view or move it.</p></div><button class="tool-button" data-action="close-dialog" aria-label="Close inventory"><svg><use href="#i-close"/></svg></button></div><div class="dialog-actions"><button class="button secondary" data-action="import-csv"><svg><use href="#i-upload"/></svg> Import CSV</button><button class="button primary" data-action="add-asset"><svg><use href="#i-plus"/></svg> Add equipment</button><button class="button secondary" data-action="download-inventory-template"><svg><use href="#i-download"/></svg> Download CSV template</button></div><p class="csv-help">Required: <code>name, type</code>. Optional: <code>ip, management_url, vendor, model</code>. Types: cabinet, switch, router, firewall, access_point, patch_panel, plc, rtu, hmi, engineering_workstation, server, workstation, ip_camera, nvr, access_controller, sensor, meter, drive, ied, gateway, printer, other. Each row is one item.</p><div id="inventory-list" class="inventory-list"></div></dialog>
   <dialog id="connections-dialog" class="inventory-dialog"><div class="dialog-header"><div><div class="section-kicker">NETWORK TOPOLOGY</div><h2>Connections</h2><p>Cables between equipment in this project.</p></div><button class="tool-button" data-action="close-dialog" aria-label="Close connections"><svg><use href="#i-close"/></svg></button></div><p class="csv-help">Select equipment and choose “Connect to equipment” to add a cable.</p><div id="connection-list" class="inventory-list"></div></dialog>
   <dialog id="connect-dialog" class="inventory-dialog"><h2>Choose interfaces</h2><p class="csv-help">Choose a free interface on each device.</p><form id="connect-form"><label class="field"><span id="connect-from-label">Source interface</span><select id="connect-from" required></select></label><label class="field"><span id="connect-to-label">Destination interface</span><select id="connect-destination" required></select></label><div class="dialog-actions"><button class="button primary" type="submit">Save connection</button><button class="button secondary" type="button" data-action="close-dialog">Cancel</button></div></form></dialog>
+  <dialog id="validation-dialog" class="inventory-dialog"><div class="dialog-header"><div><div class="section-kicker">DESIGN REVIEW</div><h2>Validation findings</h2><p>Review errors, warnings and missing information in this project.</p></div><button class="tool-button" data-action="close-dialog" aria-label="Close validation"><svg><use href="#i-close"/></svg></button></div><div id="validation-list"></div></dialog>
   <dialog id="rack-dialog" class="inventory-dialog"><div class="dialog-header"><div><div class="section-kicker">EQUIPMENT LAYOUT</div><h2 id="rack-title">Racks</h2><p id="rack-description">Choose a rack to see its devices.</p></div><button class="tool-button" data-action="close-dialog" aria-label="Close rack view"><svg><use href="#i-close"/></svg></button></div><div id="rack-content"></div></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="app.js?v=23"></script>
+  <script type="module" src="app.js?v=24"></script>
 </body>
 </html>

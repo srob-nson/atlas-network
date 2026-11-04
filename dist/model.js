@@ -77,10 +77,10 @@ export function assignRacks(assets) {
 export function initializePorts(assets, cables) {
   for (const asset of assets) {
     if (!asset.ports) asset.ports = [];
-    for (const port of asset.ports) { port.id ||= crypto.randomUUID(); port.media ??= 'Unknown'; }
+    for (const port of asset.ports) { port.id ||= crypto.randomUUID(); port.media ??= 'Unknown'; port.poe ??= 'unknown'; }
     for (const cable of cables) {
       const name = cable.from === asset.id ? cable.fromPort : cable.to === asset.id ? cable.toPort : '';
-      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ id: crypto.randomUUID(), name, speed: 'Unknown', media: 'Unknown' });
+      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ id: crypto.randomUUID(), name, speed: 'Unknown', media: 'Unknown', poe: 'unknown' });
     }
   }
   return assets;
@@ -94,7 +94,7 @@ export function configurePorts(device, count, cables) {
   while (next.length < count) {
     let n = next.length + 1;
     while (next.some(port => port.name.toLowerCase() === String(n).toLowerCase())) n++;
-    next.push({ id: crypto.randomUUID(), name: String(n), speed: 'Unknown', media: 'Unknown' });
+    next.push({ id: crypto.randomUUID(), name: String(n), speed: 'Unknown', media: 'Unknown', poe: 'unknown' });
   }
   device.ports = next;
 }
@@ -168,13 +168,15 @@ export function restoreProject(input) {
     if (!asset || typeof asset.id !== 'string' || !asset.id || ids.has(asset.id) || typeof asset.name !== 'string' || !TYPES.includes(asset.type) || (asset.placed && (!Number.isFinite(asset.x) || !Number.isFinite(asset.y) || asset.x < 0 || asset.y < 0 || asset.x > 100 || asset.y > 100))) invalid();
     ids.add(asset.id);
     for (const key of ['rackUnits', 'rackStart', 'rackHeight']) if (asset[key] != null && (!Number.isInteger(asset[key]) || asset[key] < 1 || asset[key] > 512)) invalid();
-    return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), vendor: String(asset.vendor || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null, rackUnits: asset.rackUnits ?? null, rackStart: asset.rackStart ?? null, rackHeight: asset.rackHeight ?? null };
+    for (const key of ['poeBudget', 'poeDemand']) if (asset[key] != null && (typeof asset[key] !== 'number' || !Number.isFinite(asset[key]) || asset[key] < 0)) invalid();
+    for (const key of ['network', 'vrf']) if (asset[key] != null && (typeof asset[key] !== 'string' || asset[key].length > 120)) invalid();
+    return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), network: asset.network || '', vrf: asset.vrf || '', poeBudget: asset.poeBudget ?? null, poeDemand: asset.poeDemand ?? null, vendor: String(asset.vendor || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null, rackUnits: asset.rackUnits ?? null, rackStart: asset.rackStart ?? null, rackHeight: asset.rackHeight ?? null };
   });
   for (const asset of assets) {
     const original = input.assets.find(a => a.id === asset.id);
     if (original.ports !== undefined) {
-      if (!Array.isArray(original.ports) || original.ports.length > 512 || original.ports.some(p => !p || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80 || typeof p.speed !== 'string' || p.speed.length > 80 || (p.id !== undefined && (typeof p.id !== 'string' || !p.id)) || (p.media !== undefined && (typeof p.media !== 'string' || p.media.length > 80))) || new Set(original.ports.map(p => p.name.toLowerCase())).size !== original.ports.length) invalid();
-      asset.ports = original.ports.map(({ id, name, speed, media }) => ({ id: id || crypto.randomUUID(), name, speed, media: media ?? 'Unknown' }));
+      if (!Array.isArray(original.ports) || original.ports.length > 512 || original.ports.some(p => !p || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80 || typeof p.speed !== 'string' || p.speed.length > 80 || (p.id !== undefined && (typeof p.id !== 'string' || !p.id)) || (p.media !== undefined && (typeof p.media !== 'string' || p.media.length > 80)) || (p.poe !== undefined && !['unknown', 'source', 'powered', 'none'].includes(p.poe))) || new Set(original.ports.map(p => p.name.toLowerCase())).size !== original.ports.length) invalid();
+      asset.ports = original.ports.map(({ id, name, speed, media, poe }) => ({ id: id || crypto.randomUUID(), name, speed, media: media ?? 'Unknown', poe: poe ?? 'unknown' }));
     }
     if (original.rackId !== undefined) asset.rackId = assets.some(a => a.id === original.rackId && a.type === 'cabinet' && a.id !== asset.id) ? original.rackId : '';
   }
@@ -216,7 +218,7 @@ export function serializeProject(project) {
   }) }));
   const endpoint = (deviceId, portId, name) => ({ deviceId, portId: portId || ports.find(p => p.deviceId === deviceId && p.name.toLowerCase() === (name || '').toLowerCase())?.id || null });
   const connections = project.cables.map(({ from, to, fromPort, toPort, fromPortId, toPortId, ...cable }) => ({ ...cable, from: endpoint(from, fromPortId, fromPort), to: endpoint(to, toPortId, toPort) }));
-  return { schemaVersion: 2, name: project.name, buildings, devices, racks, ports, connections };
+  return { schemaVersion: 3, name: project.name, buildings, devices, racks, ports, connections };
 }
 
 function restoreEntities(input) {
@@ -257,7 +259,7 @@ function restoreEntities(input) {
 
 export function restoreHierarchy(input) {
   const invalid = () => { throw new Error('Invalid project file.'); };
-  if (input?.schemaVersion === 2) input = restoreEntities(input);
+  if (input?.schemaVersion === 2 || input?.schemaVersion === 3) input = restoreEntities(input);
   if (input?.schemaVersion !== undefined && input.schemaVersion !== 1) throw new Error('Unsupported project schema version.');
   if (!input?.buildings) {
     const legacy = restoreProject(input);

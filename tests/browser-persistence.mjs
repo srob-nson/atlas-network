@@ -47,7 +47,7 @@ assert.equal(await evaluate(`document.querySelector('#equipment-count').textCont
 await evaluate(`window.exported = null; URL.createObjectURL = blob => { blob.text().then(text => window.exported = text); return 'blob:test'; }; HTMLAnchorElement.prototype.click = () => {}; document.querySelector('[data-action="export-project"]').click()`);
 await waitFor(`window.exported !== null`);
 const exported = JSON.parse(await evaluate('window.exported'));
-assert.equal(exported.schemaVersion, 2);
+assert.equal(exported.schemaVersion, 3);
 assert.equal(exported.devices.length, 1);
 await evaluate(`window.importError = ''; window.alert = message => { window.importError = message; }; { const input = document.querySelector('#project-file'), files = new DataTransfer(); files.items.add(new File([${JSON.stringify(JSON.stringify({...exported, schemaVersion: 999}))}], 'future.json', {type:'application/json'})); input.files = files.files; input.dispatchEvent(new Event('change')); }`);
 await waitFor(`window.importError.length > 0`);

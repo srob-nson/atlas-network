@@ -1,5 +1,6 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreHierarchy, serializeProject, configurePorts, assignRack, placeAsset, cableRoute, assignRacks, initializePorts, moveAssetToFloor, deployAsset } from './model.js?v=15';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreHierarchy, serializeProject, configurePorts, assignRack, placeAsset, cableRoute, assignRacks, initializePorts, moveAssetToFloor, deployAsset } from './model.js?v=16';
 import { loadWorkspace, storeWorkspace } from './storage.js';
+import { validateProject } from './validation.js?v=1';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -45,7 +46,7 @@ try {
     else if (legacy) migrated = [localStorage.getItem(storageKey) !== null ? storageKey : legacyStorageKey, legacy];
   }
   if (!Array.isArray(raw.projects) || !raw.projects.length) throw new Error('Invalid workspace');
-  upgrade = raw.projects.some(p => p.schemaVersion !== 2);
+  upgrade = raw.projects.some(p => p.schemaVersion !== 3);
   const index = value => Number.isInteger(value) && value >= 0 ? value : 0;
   workspace = { projects: raw.projects.map(restoreHierarchy), projectIndex: index(raw.projectIndex), buildingIndex: index(raw.buildingIndex), floorIndex: index(raw.floorIndex) };
 } catch { loadError = true; workspace = { projects: [restoreHierarchy(demo)], projectIndex: 0, buildingIndex: 0, floorIndex: 0 }; }
@@ -143,7 +144,12 @@ function rackFields(asset) {
 }
 function portFields(asset) {
   if (asset.type === 'cabinet') return '';
-  return `<label class="field"><span>Number of ports</span><input name="portCount" type="number" min="0" max="512" value="${asset.ports.length}"></label><div class="detail-heading"><strong>Interfaces</strong></div>${asset.ports.map((port, i) => `<fieldset class="port-fields"><legend>Port ${i + 1}</legend><label class="field"><span>Interface name</span><input data-port-index="${i}" data-port-field="name" value="${esc(port.name)}" maxlength="80" required></label><div class="field-row"><label class="field"><span>Speed</span><input data-port-index="${i}" data-port-field="speed" value="${esc(port.speed)}" maxlength="80"></label><label class="field"><span>Media</span><input data-port-index="${i}" data-port-field="media" value="${esc(port.media)}" maxlength="80"></label></div></fieldset>`).join('')}`;
+  return `<label class="field"><span>Number of ports</span><input name="portCount" type="number" min="0" max="512" value="${asset.ports.length}"></label><div class="detail-heading"><strong>Interfaces</strong></div>${asset.ports.map((port, i) => `<fieldset class="port-fields"><legend>Port ${i + 1}</legend><label class="field"><span>Interface name</span><input data-port-index="${i}" data-port-field="name" value="${esc(port.name)}" maxlength="80" required></label><div class="field-row"><label class="field"><span>Speed</span><input data-port-index="${i}" data-port-field="speed" value="${esc(port.speed)}" maxlength="80"></label><label class="field"><span>Media</span><input data-port-index="${i}" data-port-field="media" value="${esc(port.media)}" maxlength="80"></label></div><label class="field"><span>PoE role</span><select data-port-index="${i}" data-port-field="poe">${[['unknown','Unknown'],['source','Supplies power'],['powered','Receives power'],['none','No PoE']].map(([value, label]) => `<option value="${value}" ${port.poe === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label></fieldset>`).join('')}`;
+}
+
+function engineeringFields(asset) {
+  if (asset.type === 'cabinet') return '';
+  return `<div class="field-row"><label class="field"><span>Network</span><input name="network" value="${esc(asset.network)}" maxlength="120" placeholder="Unknown"></label><label class="field"><span>VRF</span><input name="vrf" value="${esc(asset.vrf)}" maxlength="120" placeholder="Unknown"></label></div><div class="field-row"><label class="field"><span>PoE budget (W)</span><input name="poeBudget" type="number" min="0" step="any" value="${asset.poeBudget ?? ''}" placeholder="Unknown"></label><label class="field"><span>PoE demand (W)</span><input name="poeDemand" type="number" min="0" step="any" value="${asset.poeDemand ?? ''}" placeholder="Unknown"></label></div>`;
 }
 
 function renderInspector() {
@@ -151,7 +157,7 @@ function renderInspector() {
   $('.inspector').hidden = !inspectorOpen || (!asset && !cable);
   if (asset) {
     const url = safeManagementUrl(asset.managementUrl);
-    target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.rackId ? 'In rack' : asset.placed ? 'Placed on plan' : 'Ready to place'}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Building / floor</span><select id="asset-floor">${allFloors().map(({building: b, floor: f}) => `<option value="${esc(f.id)}" ${f === floor ? 'selected' : ''}>${esc(b.name)} / ${esc(f.floorName)}</option>`).join('')}</select></label><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label>${asset.type !== 'cabinet' ? `<label class="field"><span>Cabinet / rack</span><select name="rackId"><option value="">Unassigned</option>${project.assets.filter(a => a.type === 'cabinet').map(a => `<option value="${esc(a.id)}" ${asset.rackId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>` : ''}${rackFields(asset)}<label class="field"><span>Vendor</span><input name="vendor" value="${esc(asset.vendor)}" maxlength="120"></label><label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label><label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label>${portFields(asset)}</form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions">${!asset.rackId ? `<button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button>` : ''}${asset.type === 'cabinet' ? `<button class="detail-button" data-rack-open="${esc(asset.id)}">${icon('layers')} Open rack view</button>` : ''}<button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button><label class="field"><span>Connect to another floor</span><select id="cross-floor-connect"><option value="">Choose equipment</option>${allAssets().filter(a => a.id !== asset.id && assetLocation(a.id)?.floor !== floor).map(a => `<option value="${esc(a.id)}">${esc(a.name)} · ${esc(locationName(a.id))}</option>`).join('')}</select></label>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
+    target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.rackId ? 'In rack' : asset.placed ? 'Placed on plan' : 'Ready to place'}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Building / floor</span><select id="asset-floor">${allFloors().map(({building: b, floor: f}) => `<option value="${esc(f.id)}" ${f === floor ? 'selected' : ''}>${esc(b.name)} / ${esc(f.floorName)}</option>`).join('')}</select></label><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label>${asset.type !== 'cabinet' ? `<label class="field"><span>Cabinet / rack</span><select name="rackId"><option value="">Unassigned</option>${project.assets.filter(a => a.type === 'cabinet').map(a => `<option value="${esc(a.id)}" ${asset.rackId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>` : ''}${rackFields(asset)}<label class="field"><span>Vendor</span><input name="vendor" value="${esc(asset.vendor)}" maxlength="120"></label><label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label>${engineeringFields(asset)}<label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label>${portFields(asset)}</form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions">${!asset.rackId ? `<button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button>` : ''}${asset.type === 'cabinet' ? `<button class="detail-button" data-rack-open="${esc(asset.id)}">${icon('layers')} Open rack view</button>` : ''}<button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button><label class="field"><span>Connect to another floor</span><select id="cross-floor-connect"><option value="">Choose equipment</option>${allAssets().filter(a => a.id !== asset.id && assetLocation(a.id)?.floor !== floor).map(a => `<option value="${esc(a.id)}">${esc(a.name)} · ${esc(locationName(a.id))}</option>`).join('')}</select></label>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
   } else if (cable) {
     target.innerHTML = `<div class="inspector-eyebrow">SELECTED CABLE</div><h3>${esc(globalAsset(cable.from)?.name)} → ${esc(globalAsset(cable.to)?.name)}</h3><p class="detail-note">${esc(cable.fromPort || 'Interface unspecified')} → ${esc(cable.toPort || 'Interface unspecified')}</p><button class="detail-button" data-action="edit-connection-ports">Choose interfaces</button>${crossFloor(cable) ? `<p class="detail-note">${esc(locationName(cable.from))} → ${esc(locationName(cable.to))}</p><p class="detail-note">Cross-floor connection; physical route is not shown.</p>` : `<p class="detail-note">Click a segment to add a point. Drag points onto the grid, or focus a point and use arrow keys. Delete removes it.</p><div class="detail-actions"><button class="detail-button" data-action="add-point">Add point</button><button class="detail-button" data-action="remove-point" ${pointIndex === null ? 'disabled' : ''}>Remove selected point</button><button class="detail-button" data-action="reset-route">Reset automatic route</button></div>`}`;
   } else {
@@ -277,6 +283,36 @@ function renderScene() {
 }
 
 function closeDialogs() { pendingPort = null; document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
+let validationFindings = [];
+function validationTargetLabel(ref) {
+  if (ref.kind === 'device' || ref.kind === 'rack') return globalAsset(ref.id)?.name || '';
+  if (ref.kind === 'port') {
+    const device = globalAsset(ref.deviceId), port = device?.ports.find(p => p.id === ref.id);
+    return port ? `${device.name} · ${port.name}` : '';
+  }
+  if (ref.kind === 'connection') {
+    const cable = project.cables.find(c => c.id === ref.id);
+    return cable ? `${globalAsset(cable.from)?.name || 'Unknown'} → ${globalAsset(cable.to)?.name || 'Unknown'}` : '';
+  }
+  return '';
+}
+function showValidation() {
+  const order = { error: 0, warning: 1, missing: 2 }, names = { error: 'Error', warning: 'Warning', missing: 'Missing information' };
+  validationFindings = validateProject(serializeProject(currentProject)).sort((a, b) => order[a.severity] - order[b.severity]);
+  $('#validation-list').innerHTML = validationFindings.map((item, i) => `<section class="validation-finding" data-finding-code="${esc(item.code)}" data-severity="${esc(item.severity)}"><strong>${names[item.severity]}</strong><p>${esc(item.message)}</p><div>${item.targets.map((ref, j) => { const label = validationTargetLabel(ref); return label ? `<button class="text-button validation-link" data-validation-target="${i}:${j}" data-target-kind="${esc(ref.kind)}" data-target-id="${esc(ref.id)}">${esc(label)}</button>` : ''; }).join('')}</div></section>`).join('') || '<p class="detail-note">No findings for this project.</p>';
+  closeDialogs(); $('#validation-dialog').showModal();
+}
+function openValidationTarget(ref) {
+  if (ref.kind === 'connection') { chooseCable(ref.id); return; }
+  const id = ref.kind === 'port' ? ref.deviceId : ref.id;
+  const device = globalAsset(id); if (!device) return;
+  chooseAsset(id);
+  if (ref.kind === 'port') {
+    const index = assetById(id)?.ports.findIndex(port => port.id === ref.id);
+    const input = document.querySelector(`[data-port-index="${index}"][data-port-field="name"]`);
+    input?.scrollIntoView({ block: 'center' }); input?.focus();
+  }
+}
 let connectionDraft = null;
 function portAvailable(device, port, except = null) {
   return !project.cables.some(c => c !== except && ((c.from === device.id && (c.fromPortId === port.id || c.fromPort?.toLowerCase() === port.name.toLowerCase())) || (c.to === device.id && (c.toPortId === port.id || c.toPort?.toLowerCase() === port.name.toLowerCase()))));
@@ -549,6 +585,8 @@ document.addEventListener('dblclick', event => {
 });
 
 document.addEventListener('click', event => {
+  const validationLink = event.target.closest('[data-validation-target]');
+  if (validationLink) { const [i, j] = validationLink.dataset.validationTarget.split(':').map(Number); const ref = validationFindings[i]?.targets[j]; if (ref) openValidationTarget(ref); return; }
   const rackButton = event.target.closest('[data-rack-open]');
   if (rackButton) { showRacks(rackButton.dataset.rackOpen); return; }
   const portButton = event.target.closest('[data-port-device]');
@@ -574,6 +612,7 @@ document.addEventListener('click', event => {
     case 'cancel-port': pendingPort = null; showRacks(rackView, rackDevice); break;
     case 'show-racks': showRacks(); break;
     case 'show-connections': showConnections(); break;
+    case 'show-validation': showValidation(); break;
     case 'edit-connection-ports': { const cable = selectedCable(); if (cable) openConnection(globalAsset(cable.from), globalAsset(cable.to), cable); break; }
     case 'close-dialog': closeDialogs(); break;
     case 'close-inspector': selected = { kind: null, id: null }; inspectorOpen = false; setMode('select'); render(); break;
@@ -671,7 +710,8 @@ document.addEventListener('change', event => {
     const key = field.name, value = field.value.trim();
     if (field.dataset.portField) {
       const port = asset.ports[Number(field.dataset.portIndex)], attribute = field.dataset.portField;
-      if (!port || !['name', 'speed', 'media'].includes(attribute)) return;
+      if (!port || !['name', 'speed', 'media', 'poe'].includes(attribute)) return;
+      if (attribute === 'poe' && !['unknown', 'source', 'powered', 'none'].includes(value)) return;
       if (attribute === 'name' && (!value || asset.ports.some(p => p !== port && p.name.toLowerCase() === value.toLowerCase()))) { toast('Interface names must be unique and non-empty.'); render(); return; }
       if (attribute === 'name') for (const cable of project.cables) {
         if (cable.from === asset.id && (cable.fromPortId === port.id || cable.fromPort?.toLowerCase() === port.name.toLowerCase())) { cable.fromPort = value; cable.fromPortId = port.id; }
@@ -680,6 +720,11 @@ document.addEventListener('change', event => {
       port[attribute] = value || 'Unknown'; save(); render(); return;
     }
     if (key === 'portCount') { try { if (!value) throw new Error('Enter a port count.'); configurePorts(asset, Number(value), project.cables); save(); } catch (error) { toast(error.message); } render(); return; }
+    if (key === 'poeBudget' || key === 'poeDemand') {
+      const number = value === '' ? null : Number(value);
+      if (number !== null && (!Number.isFinite(number) || number < 0)) { toast('Enter a non-negative number of watts.'); render(); return; }
+      asset[key] = number; save(); render(); return;
+    }
     if (['rackId', 'rackStart', 'rackHeight', 'rackUnits'].includes(key)) {
       try {
         const number = value === '' ? null : Number(value);
