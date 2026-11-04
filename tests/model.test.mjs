@@ -175,3 +175,18 @@ test('deploying rack-mounted equipment creates a floor rack without changing oth
   assert.equal(assets.length, 1);
   assert.equal(ap.placed, true);
 });
+
+test('inventory schema rejects ambiguous headers and oversized fields', () => {
+  assert.throws(() => parseInventory('name,Name,type\na,b,switch', []), /duplicate/i);
+  const result = parseInventory(`name,type,model\n${'a'.repeat(81)},switch,ok\nValid,router,${'x'.repeat(121)}`, []);
+  assert.equal(result.assets.length, 0);
+  assert.equal(result.errors.length, 2);
+});
+
+test('floor outlines survive project restore and reject invalid coordinates', () => {
+  const outline = [[0, 0], [100, 0], [100, 40], [40, 40], [40, 100], [0, 100]];
+  const project = { name: 'L floor', zones: [], assets: [], cables: [], outline };
+  assert.deepEqual(restoreProject(project).outline, outline);
+  assert.throws(() => restoreProject({ ...project, outline: [[0, 0], [101, 0], [0, 1]] }), /invalid/i);
+  assert.deepEqual(restoreProject({ ...project, outline: undefined }).outline, []);
+});

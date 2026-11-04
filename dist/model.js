@@ -40,6 +40,7 @@ function csvRows(text) {
 export function parseInventory(text, zones, reportZones = true) {
   const rows = csvRows(text);
   const headers = (rows.shift() || []).map(value => value.toLowerCase().replace(/[\s-]+/g, '_'));
+  if (new Set(headers).size !== headers.length) throw new Error('CSV contains duplicate column names.');
   if (!headers.includes('name') || !headers.includes('type')) throw new Error('CSV needs name and type columns.');
   const assets = [], errors = [];
   rows.forEach((values, index) => {
@@ -51,6 +52,8 @@ export function parseInventory(text, zones, reportZones = true) {
       errors.push(`Row ${index + 2}: ${!row.name ? 'name is required' : `unsupported type “${row.type}”`}.`);
       return;
     }
+    const tooLong = [['name', 80], ['model', 120], ['ip', 80], ['management_url', 500], ['url', 500]].find(([key, limit]) => (row[key] || '').length > limit);
+    if (tooLong) { errors.push(`Row ${index + 2}: ${tooLong[0]} exceeds ${tooLong[1]} characters.`); return; }
     const zone = zones.find(z => z.name.toLowerCase() === (row.zone || '').toLowerCase());
     const link = row.management_url || row.url || '';
     if (reportZones && row.zone && !zone) errors.push(`Row ${index + 2}: zone “${row.zone}” was not found; assign it after import.`);
@@ -159,8 +162,10 @@ export function restoreProject(input) {
     return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667' };
   });
   initializePorts(assignedAssets, cables);
+  const outline = input.outline === undefined ? [] : input.outline;
+  if (!Array.isArray(outline) || (outline.length && outline.length < 3) || outline.length > 200 || !outline.every(p => Array.isArray(p) && p.length === 2 && p.every(n => Number.isFinite(n) && n >= 0 && n <= 100))) invalid();
   const planImage = typeof input.planImage === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(input.planImage) ? input.planImage : '';
-  return { name: input.name, floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets: assignedAssets, cables };
+  return { name: input.name, outline: outline.map(p => [...p]), floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets: assignedAssets, cables };
 }
 
 export function cableRoute(from, waypoints, to) {

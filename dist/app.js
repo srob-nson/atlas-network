@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=11';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=12';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -70,7 +70,7 @@ let selected = { kind: null, id: null };
 const defaultZoom = 1.1;
 let view = '3d', rotation = 0, zoom = defaultZoom, mode = 'select';
 let pan = { x: 0, y: 0 }, pointIndex = null;
-let drag = null, ignoreSceneClick = false, inspectorOpen = false, lastAssetClick = null;
+let drag = null, ignoreSceneClick = false, inspectorOpen = false, lastAssetClick = null, outlineDraft = [];
 let toastTimer;
 
 function toast(message, duration = 3500) {
@@ -89,6 +89,7 @@ function setMode(next, message) {
   mode = next;
   $('#hint-text').textContent = message || 'Drag the floor to pan · drag equipment to move it';
   $('#cancel-mode').hidden = next === 'select';
+  $('#outline-controls').hidden = next !== 'outline';
   $('#scene').style.cursor = next === 'select' ? '' : 'crosshair';
 }
 
@@ -187,7 +188,7 @@ function renderScene() {
   const scene = $('#scene');
   const width = 900 / zoom, height = 500 / zoom;
   scene.setAttribute('viewBox', `${500-width/2 + pan.x} ${285-height/2 + pan.y} ${width} ${height}`);
-  const floor = [[0,0],[100,0],[100,100],[0,100]];
+  const floor = project.outline?.length ? project.outline : [[0,0],[100,0],[100,100],[0,100]];
   const p00 = point(0,0), p10 = point(100,0), p01 = point(0,100);
   const matrix = `${round((p10[0]-p00[0])/100)} ${round((p10[1]-p00[1])/100)} ${round((p01[0]-p00[0])/100)} ${round((p01[1]-p00[1])/100)} ${round(p00[0])} ${round(p00[1])}`;
   let out = `<defs><filter id="floorShadow" x="-30%" y="-30%" width="160%" height="170%"><feGaussianBlur stdDeviation="12"/></filter><filter id="tagShadow" x="-30%" y="-50%" width="160%" height="200%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#355b42" flood-opacity=".12"/></filter><clipPath id="floorClip">${poly(floor, '#fff')}</clipPath></defs>`;
@@ -195,10 +196,17 @@ function renderScene() {
     const shadow = floor.map(([x,y]) => { const [a,b] = point(x,y); return `${round(a+8)},${round(b+20)}`; }).join(' ');
     out += `<polygon points="${shadow}" fill="#829c86" opacity=".14" filter="url(#floorShadow)"/>`;
     const ground = floor.map(([x,y]) => point(x,y));
-    out += `<polygon points="${ground[1].map(round).join(',')} ${ground[2].map(round).join(',')} ${round(ground[2][0])},${round(ground[2][1]+13)} ${round(ground[1][0])},${round(ground[1][1]+13)}" fill="#c8d7c8"/><polygon points="${ground[2].map(round).join(',')} ${ground[3].map(round).join(',')} ${round(ground[3][0])},${round(ground[3][1]+13)} ${round(ground[2][0])},${round(ground[2][1]+13)}" fill="#d4e1d2"/>`;
+    for (let i = 0; i < ground.length; i++) {
+      const a = ground[i], b = ground[(i + 1) % ground.length];
+      if (b[0] > a[0]) out += `<polygon points="${a.map(round).join(',')} ${b.map(round).join(',')} ${round(b[0])},${round(b[1]+13)} ${round(a[0])},${round(a[1]+13)}" fill="#c8d7c8"/>`;
+    }
   }
   out += poly(floor, '#f1f5ed', 'stroke="#b9cbbb" stroke-width="1.5" data-floor="true"');
-  if (project.planImage) out += `<image href="${esc(project.planImage)}" x="0" y="0" width="100" height="100" preserveAspectRatio="none" transform="matrix(${matrix})" opacity=".8" pointer-events="none"/>`;
+  if (project.planImage) out += `<g ${mode === 'outline' ? '' : 'clip-path="url(#floorClip)"'} pointer-events="none"><image href="${esc(project.planImage)}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid meet" transform="matrix(${matrix})" opacity=".8"/></g>`;
+  if (mode === 'outline' && outlineDraft.length) {
+    out += `<polyline points="${points(outlineDraft)}" fill="none" stroke="#277754" stroke-width="3" stroke-dasharray="7 4" pointer-events="none"/>`;
+    for (const [x,y] of outlineDraft) { const [px,py] = point(x,y); out += `<circle cx="${round(px)}" cy="${round(py)}" r="5" fill="#277754" stroke="white" stroke-width="2" pointer-events="none"/>`; }
+  }
   out += demoFurniture() + demoWalls();
   const editing = selectedCable() && !crossFloor(selectedCable()) ? selectedCable() : null;
   if (editing) {
@@ -332,6 +340,12 @@ function handleSceneClick(event) {
     project.cables.push({ id: uid(), from: from.id, to: to.id, waypoints: [] }); save(); inspectorOpen = true; setMode('select'); render(); toast(`Connected ${from.name} to ${to.name}.`); return;
   }
   if (mode === 'double-connect') return;
+  if (mode === 'outline') {
+    const location = worldAt(event);
+    if (!location) { toast('Choose a point within the plan area.'); return; }
+    if (outlineDraft.length >= 200) { toast('The outline can have up to 200 points.'); return; }
+    outlineDraft.push(location); renderScene(); return;
+  }
   if (mode === 'place') {
     const location = worldAt(event), asset = selectedAsset();
     if (!location || !asset) { toast('Choose a point inside the floor plan.'); return; }
@@ -403,6 +417,12 @@ $('#scene').addEventListener('pointermove', event => {
   if (!drag.moved && Math.hypot(event.clientX-drag.clientX,event.clientY-drag.clientY) < 4) return;
   drag.moved = true;
   if (mode === 'double-connect') return;
+  if (mode === 'outline') {
+    const location = worldAt(event);
+    if (!location) { toast('Choose a point within the plan area.'); return; }
+    if (outlineDraft.length >= 200) { toast('The outline can have up to 200 points.'); return; }
+    outlineDraft.push(location); renderScene(); return;
+  }
   $('#scene').classList.add('dragging');
   if (drag.kind === 'asset') { const [x,y] = worldFromEvent(event), asset = assetById(drag.id); Object.assign(asset, { ...placeAsset(asset, [], drag.original.x+x-drag.start[0], drag.original.y+y-drag.start[1]), zoneId: drag.original.zoneId }); }
   if (drag.kind === 'point') selectedCable().waypoints[pointIndex] = snap(event);
@@ -498,9 +518,16 @@ document.addEventListener('click', event => {
     case 'close-dialog': closeDialogs(); break;
     case 'close-inspector': selected = { kind: null, id: null }; inspectorOpen = false; setMode('select'); render(); break;
     case 'import-csv': $('#inventory-file').click(); break;
+    case 'download-inventory-template': download('titan-inventory-template.csv', 'name,type,ip,management_url,model\r\n', 'text/csv;charset=utf-8'); break;
     case 'upload-plan': $('#plan-file').click(); break;
+    case 'trace-outline': outlineDraft = []; setMode('outline', 'Click around the floor boundary, then choose Finish outline'); renderScene(); break;
+    case 'undo-outline': outlineDraft.pop(); renderScene(); break;
+    case 'finish-outline':
+      if (outlineDraft.length < 3) { toast('Choose at least three points for the outline.'); break; }
+      project.outline = outlineDraft.map(p => [...p]); outlineDraft = []; setMode('select'); save(); render(); toast('Floor outline saved.'); break;
+    case 'clear-outline': project.outline = []; save(); render(); toast('Floor outline reset.'); break;
     case 'import-project': $('#project-file').click(); break;
-    case 'cancel-mode': inspectorOpen = !!selected.id; setMode('select'); renderInspector(); break;
+    case 'cancel-mode': outlineDraft = []; inspectorOpen = !!selected.id; setMode('select'); render(); break;
     case 'add-asset': {
       const added = { id: uid(), name: 'New equipment', type: 'switch', zoneId: '', model: '', ip: '', managementUrl: '', placed: false, rackId: '' };
       project.assets.push(added); selected = { kind: 'asset', id: added.id }; inspectorOpen = true; closeDialogs(); save(); setMode('select'); render(); toast('Equipment added. Edit its details and place it on the plan.'); break;
@@ -550,7 +577,7 @@ document.addEventListener('click', event => {
     }
     case 'new-floor': {
       const name = prompt('Floor name', 'New floor')?.trim(); if (!name) break;
-      building.floors.push(blankFloor(name.slice(0, 80))); workspace.floorIndex = building.floors.length - 1; selectFloor(); resetSelection(); save(); render(); break;
+      building.floors.push({ ...blankFloor(name.slice(0, 80)), outline: (floor.outline || []).map(p => [...p]) }); workspace.floorIndex = building.floors.length - 1; selectFloor(); resetSelection(); save(); render(); break;
     }
     case 'rename-building': { const name = prompt('Building name', building.name)?.trim(); if (name) { building.name = name.slice(0, 80); save(); render(); } break; }
     case 'rename-floor': { const name = prompt('Floor name', floor.floorName)?.trim(); if (name) { floor.floorName = name.slice(0, 80); save(); render(); } break; }
@@ -636,7 +663,7 @@ $('#project-file').addEventListener('change', async event => {
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
   if (drag) { cancelDrag(); pointers.clear(); return; }
-  if (mode !== 'select') { inspectorOpen = !!selected.id; setMode('select'); renderInspector(); }
+  if (mode !== 'select') { outlineDraft = []; inspectorOpen = !!selected.id; setMode('select'); render(); }
   else if (!$('.inspector').hidden) { selected = { kind: null, id: null }; inspectorOpen = false; render(); }
 });
 render();

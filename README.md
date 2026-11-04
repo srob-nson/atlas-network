@@ -6,8 +6,8 @@ Run locally with `python3 -m http.server 8000 --directory dist`, then open `http
 
 ## Start a design
 
-1. Create a project, building and floor using the sidebar controls, then upload a PNG, JPEG, or WebP floor plan (up to 2 MB). Switch floors using the sidebar selectors.
-2. Add equipment or import a CSV. The required columns are `name,type`; optional columns are `ip,management_url,model`. Supported types are `cabinet`, `switch`, `router`, `firewall`, `access_point`, and `patch_panel`.
+1. Create a project, building and floor using the sidebar controls, then upload a PNG, JPEG, or WebP floor plan (up to 2 MB). Choose **Trace floor outline**, click around its boundary, and finish the outline. New floors inherit the outline; upload a separate image for each floor. Switch floors using the sidebar selectors.
+2. Add equipment or import a CSV using the template in Equipment. Each row is an item; `name` and `type` are required, and `ip`, `management_url` and `model` are optional. Supported types are `cabinet`, `switch`, `router`, `firewall`, `access_point`, and `patch_panel`. Names and IP addresses allow up to 80 characters, models up to 120, and management URLs up to 500.
 3. The equipment inventory is shared across the project. Select an item and change its Building / floor in the details to move it without importing the CSV again. Connections remain, while its floor position and route points are reset. Select an item to open its details, or drag it directly on the floor plan. Use the details overlay to edit it, place it manually, open its HTTP(S) management interface, or connect it to another placed item. Placing a switch, firewall or router creates a rack at that position and puts the device inside. Auto-placement does the same for unplaced equipment and leaves already placed equipment where it is.
 4. Export the current view as SVG for documentation, or export the project as JSON to back it up or move it to another browser. Import a JSON export from the same menu to restore it.
 
