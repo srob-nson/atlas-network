@@ -1,4 +1,4 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor } from './model.js?v=10';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=11';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -335,7 +335,7 @@ function handleSceneClick(event) {
   if (mode === 'place') {
     const location = worldAt(event), asset = selectedAsset();
     if (!location || !asset) { toast('Choose a point inside the floor plan.'); return; }
-    Object.assign(asset, { ...placeAsset(asset, [], ...location), zoneId: asset.zoneId });
+    deployAsset(project.assets, asset, ...location);
     save(); inspectorOpen = true; setMode('select'); render(); toast(`${asset.name} placed on the floor plan.`); return;
   }
   const cableNode = event.target.closest('[data-cable], [data-cable-hit]');
@@ -502,8 +502,8 @@ document.addEventListener('click', event => {
     case 'import-project': $('#project-file').click(); break;
     case 'cancel-mode': inspectorOpen = !!selected.id; setMode('select'); renderInspector(); break;
     case 'add-asset': {
-      const added = { id: uid(), name: 'New equipment', type: 'switch', zoneId: '', model: '', ip: '', managementUrl: '', placed: false };
-      project.assets.push(added); project.assets = assignRacks(project.assets); selected = { kind: 'asset', id: added.id }; inspectorOpen = true; closeDialogs(); save(); setMode('select'); render(); toast('Equipment added. Edit its details and place it on the plan.'); break;
+      const added = { id: uid(), name: 'New equipment', type: 'switch', zoneId: '', model: '', ip: '', managementUrl: '', placed: false, rackId: '' };
+      project.assets.push(added); selected = { kind: 'asset', id: added.id }; inspectorOpen = true; closeDialogs(); save(); setMode('select'); render(); toast('Equipment added. Edit its details and place it on the plan.'); break;
     }
     case 'place-asset': if (asset) { inspectorOpen = false; renderInspector(); setMode('place', `Choose a position for ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); } break;
     case 'connect-asset':
@@ -515,7 +515,9 @@ document.addEventListener('click', event => {
       break;
     case 'auto-place': {
       const before = project.assets.filter(a => a.placed).length;
+      const beforeIds = new Set(project.assets.filter(a => a.placed).map(a => a.id));
       project.assets = autoPlaceFloor(project.assets);
+      for (const item of [...project.assets]) if (item.placed && ['switch', 'firewall', 'router'].includes(item.type) && !item.rackId && !beforeIds.has(item.id)) deployAsset(project.assets, item, item.x, item.y);
       const count = project.assets.filter(a => a.placed).length - before;
       save(); render(); toast(count ? `Placed ${count} equipment item${count === 1 ? '' : 's'} on the floor plan.` : 'All floor equipment is already placed.'); break;
     }
@@ -589,8 +591,9 @@ document.addEventListener('change', event => {
     asset[key] = key === 'managementUrl' ? safeManagementUrl(value) : value;
     if (defaultLayout) { asset.ports = defaultPorts(value); initializePorts([asset], project.cables); }
     if (key === 'type') {
-      if (asset.type !== 'cabinet') { project.assets.forEach(a => { if (a.rackId === asset.id) a.rackId = ''; }); delete asset.rackId; }
+      if (asset.type !== 'cabinet') { project.assets.forEach(a => { if (a.rackId === asset.id) a.rackId = ''; }); if (asset.type === 'access_point') asset.rackId = ''; }
       else project.assets.forEach(a => { if (!a.rackId) delete a.rackId; });
+      if (['switch', 'firewall', 'router'].includes(asset.type) && !asset.rackId) asset.rackId = '';
       project.assets = assignRacks(project.assets);
     }
     save(); render();
@@ -603,7 +606,8 @@ $('#inventory-file').addEventListener('change', async event => {
   try {
     if (file.size > 2_000_000) throw new Error('Inventory CSV must be smaller than 2 MB.');
     const result = parseInventory(await file.text(), project.zones, false);
-    project.assets.push(...result.assets); if (result.assets.some(a => a.type === 'cabinet')) project.assets.forEach(a => { if (!a.rackId) delete a.rackId; }); project.assets = assignRacks(project.assets); save(); render();
+    result.assets.filter(a => ['switch', 'firewall', 'router'].includes(a.type)).forEach(a => { a.rackId = ''; });
+    project.assets.push(...result.assets); if (result.assets.some(a => a.type === 'cabinet')) project.assets.forEach(a => { if (!a.rackId && !['switch', 'firewall', 'router'].includes(a.type)) delete a.rackId; }); project.assets = assignRacks(project.assets); save(); render();
     toast(`Imported ${result.assets.length} equipment item${result.assets.length === 1 ? '' : 's'}.`);
     if (result.errors.length) alert(`Inventory notes:\n\n${result.errors.slice(0, 30).join('\n')}${result.errors.length > 30 ? `\n…and ${result.errors.length - 30} more.` : ''}`);
   } catch (error) { alert(error.message); }

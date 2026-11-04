@@ -215,3 +215,13 @@ export function moveAssetToFloor(source, target, asset, cables) {
   target.assets.push(asset);
   cables.forEach(cable => { if (cable.from === asset.id || cable.to === asset.id) cable.waypoints = []; });
 }
+
+export function deployAsset(assets, asset, x, y) {
+  if (['switch', 'firewall', 'router'].includes(asset.type) && !asset.rackId) {
+    const rack = placeAsset({ id: crypto.randomUUID(), name: `${asset.name} rack`, type: 'cabinet', model: '', ip: '', managementUrl: '', rackId: '' }, [], x, y);
+    assets.push(rack);
+    Object.assign(asset, { rackId: rack.id, placed: false, x: null, y: null });
+  } else {
+    Object.assign(asset, { ...placeAsset(asset, [], x, y), zoneId: asset.zoneId || '' });
+  }
+}

@@ -155,3 +155,23 @@ test('moving equipment between floors preserves connections and clears floor-spe
   assert.equal(device.zoneId, '');
   assert.deepEqual(cables[0].waypoints, []);
 });
+
+test('deploying rack-mounted equipment creates a floor rack without changing other devices', async () => {
+  const { deployAsset } = await import('../dist/model.js');
+  for (const type of ['switch', 'firewall', 'router']) {
+    const device = { id: type, name: type, type, placed: false, rackId: '' };
+    const assets = [device];
+    deployAsset(assets, device, 30, 40);
+    assert.equal(assets.length, 2);
+    assert.equal(assets[1].type, 'cabinet');
+    assert.equal(assets[1].placed, true);
+    assert.equal(assets[1].x, 30);
+    assert.equal(assets[1].y, 40);
+    assert.equal(device.rackId, assets[1].id);
+    assert.equal(device.placed, false);
+  }
+  const ap = { id: 'ap', name: 'AP', type: 'access_point', placed: false };
+  const assets = [ap]; deployAsset(assets, ap, 10, 20);
+  assert.equal(assets.length, 1);
+  assert.equal(ap.placed, true);
+});

@@ -44,5 +44,7 @@ await evaluate(`localStorage.removeItem('titan-workspace-v2'); localStorage.setI
 await new Promise(r=>setTimeout(r,1000));
 assert.equal(await evaluate(`document.body.innerText.toLowerCase().includes('zone')`), false);
 await evaluate(`document.querySelector('[data-action="add-asset"]').click(); document.querySelector('[data-action="auto-place"]').click()`);
-assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets[0].placed`), true);
+assert.equal(await evaluate(`(() => { const assets = JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets; return assets.some(a => a.type === 'cabinet' && a.placed && a.id === assets[0].rackId); })()`), true);
+await evaluate(`document.querySelector('[data-action="add-asset"]').click(); const type = document.querySelector('[name="type"]'); type.value = 'firewall'; type.dispatchEvent(new Event('change', {bubbles:true})); document.querySelector('[data-action="place-asset"]').click(); const scene = document.querySelector('#scene'); const p = new DOMPoint(500, 285).matrixTransform(scene.getScreenCTM()); scene.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:p.x, clientY:p.y}));`);
+assert.equal(await evaluate(`(() => { const assets = JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets; const firewall = assets.find(a => a.type === 'firewall'); return assets.some(a => a.id === firewall.rackId && a.type === 'cabinet' && a.placed); })()`), true);
 console.log('Rack connections and zone-free floor placement passed'); socket.close();
