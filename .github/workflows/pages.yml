@@ -1,6 +1,8 @@
-name: Deploy GitHub Pages
+name: Test and deploy GitHub Pages
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 permissions:
@@ -11,7 +13,29 @@ concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - name: Browser integration tests
+        run: |
+          python3 -m http.server 5173 --bind 127.0.0.1 > /tmp/titan-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "${CHROME_PID:-}" 2>/dev/null || true' EXIT
+          for i in {1..50}; do curl -fsS http://127.0.0.1:5173/dist/ > /dev/null && break; sleep 0.2; done
+          curl -fsS http://127.0.0.1:5173/dist/ > /dev/null
+          google-chrome --headless --no-sandbox --disable-gpu --window-size=1600,1000 --remote-debugging-port=9223 --user-data-dir=/tmp/titan-ci-chrome http://127.0.0.1:5173/dist/ > /tmp/titan-chrome.log 2>&1 &
+          CHROME_PID=$!
+          for i in {1..50}; do curl -fsS http://127.0.0.1:9223/json/list | grep -q '"type": "page"' && break; sleep 0.2; done
+          curl -fsS http://127.0.0.1:9223/json/list | grep -q '"type": "page"'
+          npm run test:browser
   deploy:
+    if: github.event_name != 'pull_request'
+    needs: test
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

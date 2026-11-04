@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f7f6">
   <meta name="description" content="Plan, visualize, and document network infrastructure in context.">
   <title>Titan — Spatial network design</title>
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=18">
 </head>
 <body>
   <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -82,6 +82,6 @@
   <dialog id="physical-route-dialog" class="inventory-dialog" aria-labelledby="physical-route-title"><form id="physical-route-form"><h2 id="physical-route-title">Physical route</h2><p class="csv-help">Select the continuous chain of pathways and risers connecting the equipment. Titan checks endpoint continuity only; it does not verify clearance, capacity or installation feasibility.</p><fieldset><legend>Pathways</legend><div id="route-pathways"></div></fieldset><fieldset><legend>Risers</legend><div id="route-risers"></div></fieldset><label class="field"><span>Additional leads and slack (m)</span><input name="extraMeters" type="number" min="0" step="any" placeholder="Unknown"></label><label class="field"><span>Reviewer and evidence</span><input name="reviewNote" maxlength="1000" placeholder="Required to record a review"></label><p id="physical-route-error" role="alert"></p><div class="dialog-actions"><button class="button primary" type="submit" value="save">Save unverified</button><button class="button secondary" type="submit" value="review">Record manual review</button><button class="button secondary" type="button" data-action="close-dialog">Cancel</button></div></form></dialog>
   <dialog id="rack-dialog" class="inventory-dialog"><div class="dialog-header"><div><div class="section-kicker">EQUIPMENT LAYOUT</div><h2 id="rack-title">Racks</h2><p id="rack-description">Choose a rack to see its devices.</p></div><button class="tool-button" data-action="close-dialog" aria-label="Close rack view"><svg><use href="#i-close"/></svg></button></div><div id="rack-content"></div></dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="app.js?v=25"></script>
+  <script type="module" src="app.js?v=26"></script>
 </body>
 </html>

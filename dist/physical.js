@@ -76,11 +76,4 @@ export function routeStatus(project, connection) {
   return route.review?.signature === signature(project, connection) && interfacesKnown(project, connection) && estimateRoute(project, connection).complete ? 'reviewed' : 'documented';
 }
 
-export function compassAngle(northDegrees, rotation, view) {
-  if (northDegrees == null || !Number.isFinite(northDegrees)) return null;
-  const radians = northDegrees * Math.PI / 180;
-  let x = Math.sin(radians) / 6.4, y = -Math.cos(radians) / 4.7;
-  for (let i = 0; i < rotation; i++) [x, y] = [-y, x];
-  const [sx, sy] = view === '3d' ? [3.25 * (x - y), 1.48 * (x + y)] : [6.4 * x, 4.7 * y];
-  return Math.round(Math.atan2(sx, -sy) * 180 / Math.PI) || 0;
-}
+export { compassAngle } from './geometry.js';

@@ -1,10 +1,43 @@
 # Titan
 
-A browser-local workspace for placing network equipment and cable connections on floor plans across projects, buildings and floors. The initial project contains example data.
+A browser-local workspace for placing network equipment and cable connections on floor plans across projects, buildings and floors. The initial project contains example data. Titan runs entirely in the browser; it does not need a backend or an account.
 
-Run locally with `python3 -m http.server 8000 --directory dist`, then open `http://localhost:8000`. Run the data checks with `npm test`.
+![Titan workspace showing network equipment and connections on a floor plan](docs/screenshots/workspace.png)
 
-The browser checks use an isolated Chrome profile and clear its preview data. Serve the repository root on port 5173, start Chrome with remote debugging on port 9223, and run the `tests/browser-*.mjs` scripts (except `browser-storage.mjs`, which is a helper).
+![Validation findings with links to affected equipment](docs/screenshots/validation.png)
+
+Run locally with `python3 -m http.server 8000 --directory dist`, then open `http://localhost:8000`. The files in `dist` are the application source and are served directly; there is no build step or dependency installation.
+
+## Development and tests
+
+Use Node.js 22 or later for the tests. Run the domain and integration checks with `npm test`. The browser checks drive Chrome through its debugging interface; they clear preview data, so use a **disposable browser profile**:
+
+```sh
+# In separate terminals, from the repository root:
+python3 -m http.server 5173 --bind 127.0.0.1
+google-chrome --headless --disable-gpu --window-size=1600,1000 --remote-debugging-port=9223 --user-data-dir=/tmp/titan-test-chrome http://127.0.0.1:5173/dist/
+npm run test:browser
+```
+
+CI runs both suites on pushes and pull requests. The Pages job deploys `dist` only after the tests pass on the main branch. Asset paths are relative so the site also works under a GitHub Pages repository path.
+
+## Architecture
+
+The browser loads ES modules directly from `dist`:
+
+| Module | Responsibility |
+| --- | --- |
+| `model.js` | Project entities, import/export, schema validation and migrations; no DOM required. |
+| `storage.js` | IndexedDB workspace reads and committed writes. |
+| `validation.js` | Extensible engineering checks on project data; no DOM required. |
+| `physical.js` | Route continuity, length estimates and review status. |
+| `geometry.js` | Coordinate projection, view rotation and compass calculations. |
+| `rendering.js` | Floor-plan SVG rendering. |
+| `ui.js` | Shared interface helpers and application dialogs. |
+| `app.js` | Application state, event handling and coordination between modules. |
+| `styles.css` | Shared application styles. |
+
+`restoreHierarchy` in `model.js` normalizes older data into the runtime hierarchy; `serializeProject` writes the current versioned entity schema. Keep the older migrations and legacy local-storage import path when extending the schema, including for users who skip releases. Tests in `tests/` cover the model independently and exercise the interface and persistence in an isolated browser.
 
 ## Start a design
 
@@ -46,3 +79,14 @@ Choose **Validate design** to review errors, warnings and missing information. S
 Set the network and VRF names in equipment details; duplicate IP addresses are compared only when both names are specified and match exactly. Use an explicit name such as `default` for a default VRF. Missing IP, network or VRF values are reported as missing information.
 
 For each interface, enter its speed with units, media and PoE role. Titan compares recognized copper and fiber media, and warns when declared speeds differ because negotiation may still be possible. Unrecognized or missing values are reported as unknown. For PoE, set the supplying and powered interface roles, the supplying device's budget in watts and the powered device's demand in watts. The total counts each powered device once per source; a device with multiple sources has an unknown load split. These checks do not model PoE classes, power loss, supported speed ranges or physical cable suitability.
+
+## Known limitations
+
+- Projects are local to one browser profile and are not synchronized or shared automatically. Site-data deletion or storage failure can remove local data; export JSON backups.
+- The angled view is illustrative. A route review records a human decision and does not prove that a cable can be installed; check the site and applicable requirements separately.
+- Link and PoE checks use the metadata entered and do not model every negotiation, power or installation constraint. Unknown values stay unknown.
+- Browser integration tests currently target Chrome. Other browsers have not been covered by the automated browser suite.
+
+## Licence
+
+Titan is available under the [MIT License](LICENSE). See [CHANGELOG.md](CHANGELOG.md) for release notes.

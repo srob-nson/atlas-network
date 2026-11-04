@@ -25,6 +25,8 @@ async function draw(name, useEquipment = false) {
   await evaluate(`document.querySelector('[data-action="draw-pathway"]').click(); ${useEquipment ? `document.querySelector('[data-asset="a"]').dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:0,clientY:0}));` : `document.querySelector('#pathway-x').value='0'; document.querySelector('#pathway-y').value='0'; document.querySelector('[data-action="add-pathway-point"]').click();`} document.querySelector('#pathway-x').value='100'; document.querySelector('#pathway-y').value='0'; document.querySelector('[data-action="add-pathway-point"]').click(); document.querySelector('[data-action="finish-pathway"]').click(); document.querySelector('#question-input').value=${JSON.stringify(name)}; document.querySelector('#question-form').requestSubmit()`);
 }
 await draw('Ground tray', true);
+assert.equal(await evaluate(`document.querySelectorAll('#scene [data-pathway]').length`), 1);
+assert.equal(await evaluate(`document.querySelectorAll('#scene [data-riser]').length`), 1);
 await evaluate(`{const e=document.querySelector('#floor-select');e.value='1';e.dispatchEvent(new Event('change',{bubbles:true}));}`);
 await evaluate(`document.querySelector('[data-action="floor-settings"]').click(); var f=document.querySelector('#floor-settings-form'); f.elements.widthMeters.value='10'; f.elements.heightMeters.value='20'; f.requestSubmit()`);
 await evaluate(`document.querySelector('[data-action="physical-assets"]').click()`);
