@@ -70,7 +70,7 @@ let selected = { kind: null, id: null };
 const defaultZoom = 1.1;
 let view = '3d', rotation = 0, zoom = defaultZoom, mode = 'select';
 let pan = { x: 0, y: 0 }, pointIndex = null;
-let drag = null, ignoreSceneClick = false, inspectorOpen = false;
+let drag = null, ignoreSceneClick = false, inspectorOpen = false, lastAssetClick = null;
 let toastTimer;
 
 function toast(message, duration = 3500) {
@@ -331,6 +331,7 @@ function handleSceneClick(event) {
     if (project.cables.some(c => (c.from === from.id && c.to === to.id) || (c.from === to.id && c.to === from.id))) { toast('These items are already connected.'); return; }
     project.cables.push({ id: uid(), from: from.id, to: to.id, waypoints: [] }); save(); inspectorOpen = true; setMode('select'); render(); toast(`Connected ${from.name} to ${to.name}.`); return;
   }
+  if (mode === 'double-connect') return;
   if (mode === 'place') {
     const location = worldAt(event), asset = selectedAsset();
     if (!location || !asset) { toast('Choose a point inside the floor plan.'); return; }
@@ -370,8 +371,9 @@ $('#scene').addEventListener('pointerdown', event => {
     drag = { kind: 'pinch', distance: Math.hypot(a.x-b.x,a.y-b.y), zoom, center: [(a.x+b.x)/2,(a.y+b.y)/2] };
     return;
   }
-  if (mode !== 'select') return;
   const node = event.target.closest('[data-asset]'), asset = node && assetById(node.dataset.asset);
+  if (mode !== 'select' && mode !== 'double-connect') return;
+  if (mode === 'double-connect' && !asset) return;
   const handle = event.target.closest('[data-point]'), hit = event.target.closest('[data-cable-hit]');
   const base = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, moved: false };
   if (handle && selectedCable()) {
@@ -399,7 +401,9 @@ $('#scene').addEventListener('pointermove', event => {
   }
   if (!drag || event.pointerId !== drag.pointerId) return;
   if (!drag.moved && Math.hypot(event.clientX-drag.clientX,event.clientY-drag.clientY) < 4) return;
-  drag.moved = true; $('#scene').classList.add('dragging');
+  drag.moved = true;
+  if (mode === 'double-connect') return;
+  $('#scene').classList.add('dragging');
   if (drag.kind === 'asset') { const [x,y] = worldFromEvent(event), asset = assetById(drag.id); Object.assign(asset, { ...placeAsset(asset, [], drag.original.x+x-drag.start[0], drag.original.y+y-drag.start[1]), zoneId: drag.original.zoneId }); }
   if (drag.kind === 'point') selectedCable().waypoints[pointIndex] = snap(event);
   if (drag.kind === 'pan') { const p = svgPosition(event.clientX,event.clientY); pan.x += drag.start.x-p.x; pan.y += drag.start.y-p.y; }
@@ -410,7 +414,19 @@ $('#scene').addEventListener('pointerup', event => {
   if (drag?.kind === 'pinch') { drag = null; ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); return; }
   if (!drag || event.pointerId !== drag.pointerId) return;
   const done = drag; drag = null; $('#scene').classList.remove('dragging');
-  if (done.kind === 'asset') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); if (done.moved) save(); chooseAsset(done.id); }
+  if (done.kind === 'asset') {
+    ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0);
+    const isDouble = !done.moved && event.pointerType === 'mouse' && lastAssetClick?.id === done.id && event.timeStamp - lastAssetClick.time < 500 && Math.hypot(event.clientX - lastAssetClick.x, event.clientY - lastAssetClick.y) < 8;
+    lastAssetClick = !done.moved && !isDouble ? { id: done.id, time: event.timeStamp, x: event.clientX, y: event.clientY } : null;
+    if (isDouble && mode === 'select') {
+      const asset = assetById(done.id); selected = { kind: 'asset', id: asset.id };
+      setMode('double-connect', `Double-click another equipment item to connect to ${asset.name}`);
+    } else if (isDouble && mode === 'double-connect') {
+      setMode('connect'); ignoreSceneClick = false; handleSceneClick({ target: document.querySelector(`[data-asset="${CSS.escape(done.id)}"]`) });
+      if (mode === 'connect') setMode('double-connect', `Double-click another equipment item to connect to ${selectedAsset().name}`);
+      ignoreSceneClick = true;
+    } else if (mode === 'select') { if (done.moved) save(); chooseAsset(done.id); }
+  }
   else if (done.kind === 'point') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); if (done.moved || done.inserted) save(); render(); }
   else if (done.kind === 'cable') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); chooseCable(done.id); }
   else if (done.kind === 'pan') { ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); if (!done.moved) { ignoreSceneClick = false; handleSceneClick({ target: done.target, clientX: event.clientX, clientY: event.clientY }); ignoreSceneClick = true; } }

@@ -15,6 +15,8 @@ Projects and floor-plan images are stored in the current browser. JSON exports i
 
 ### Navigating and routing cables
 
+Double-click equipment on the floor plan, then double-click another item to connect them. Use Cancel or Escape to stop connecting.
+
 Use the mouse wheel, trackpad scroll or trackpad pinch over the floor plan to zoom around the pointer; touch screens also support pinch to zoom. Drag empty plan space to pan; Reset view restores the original position, zoom and rotation.
 
 Select a cable on the plan or in Connections to edit its route. Click a segment to add a grid point, then drag points to move them. Select a point to remove it, or reset the route to automatic. The Add point control also creates a keyboard-focusable point: use arrow keys to move it and Delete or Backspace to remove it. Escape cancels an active drag. Cable points remain fixed when equipment moves and are saved with the project.
