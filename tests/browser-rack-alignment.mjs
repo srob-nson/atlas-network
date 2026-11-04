@@ -1,5 +1,6 @@
 // Run against a local preview and Chrome debugging port 9223. Uses and clears the preview browser storage.
 import assert from 'node:assert/strict';
+import { browserEvaluate } from './browser-storage.mjs';
 const pages = await (await fetch('http://127.0.0.1:9223/json/list')).json();
 const page = pages.find(p => p.url.startsWith('http://127.0.0.1:5173'));
 const socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -7,8 +8,8 @@ await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror
 let id = 0; const pending = new Map();
 socket.onmessage = e => { const m = JSON.parse(e.data); if (pending.has(m.id)) { pending.get(m.id)(m.result); pending.delete(m.id); } };
 const send = (method,params={}) => new Promise(resolve => { const n=++id; pending.set(n,resolve); socket.send(JSON.stringify({id:n,method,params})); });
-const evaluate = expression => send('Runtime.evaluate',{expression,returnByValue:true}).then(r => { if(r.exceptionDetails) throw Error(r.exceptionDetails.exception?.description); return r.result.value; });
-await send('Page.navigate', { url: 'http://127.0.0.1:5173/' }); await new Promise(r=>setTimeout(r,1000));
+const evaluate = browserEvaluate(send);
+await send('Page.navigate', { url: 'http://127.0.0.1:5173/dist/' }); await new Promise(r=>setTimeout(r,1000));
 await evaluate('localStorage.clear(); location.reload()'); await new Promise(r=>setTimeout(r,1000));
 await evaluate(`document.querySelector('[data-action="show-racks"]').click(); document.querySelector('[data-rack-open="rack"]').click()`);
 async function double(selector) { await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`); const p=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`); for (const count of [1,2]) { await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:count,...p}); await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:count,...p}); } }
@@ -44,7 +45,7 @@ await evaluate(`localStorage.removeItem('titan-workspace-v2'); localStorage.setI
 await new Promise(r=>setTimeout(r,1000));
 assert.equal(await evaluate(`document.body.innerText.toLowerCase().includes('zone')`), false);
 await evaluate(`document.querySelector('[data-action="add-asset"]').click(); document.querySelector('[data-action="auto-place"]').click()`);
-assert.equal(await evaluate(`(() => { const assets = JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets; return assets.some(a => a.type === 'cabinet' && a.placed && a.id === assets[0].rackId); })()`), true);
+assert.equal(await evaluate(`(() => { const assets = JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets; return assets.length === 1 && assets[0].placed && !assets[0].rackId; })()`), true);
 await evaluate(`document.querySelector('[data-action="add-asset"]').click(); const type = document.querySelector('[name="type"]'); type.value = 'firewall'; type.dispatchEvent(new Event('change', {bubbles:true})); document.querySelector('[data-action="place-asset"]').click(); const scene = document.querySelector('#scene'); const p = new DOMPoint(500, 285).matrixTransform(scene.getScreenCTM()); scene.dispatchEvent(new MouseEvent('click', {bubbles:true, clientX:p.x, clientY:p.y}));`);
-assert.equal(await evaluate(`(() => { const assets = JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets; const firewall = assets.find(a => a.type === 'firewall'); return assets.some(a => a.id === firewall.rackId && a.type === 'cabinet' && a.placed); })()`), true);
+assert.equal(await evaluate(`(() => { const assets = JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets; const firewall = assets.find(a => a.type === 'firewall'); return assets.length === 2 && firewall.placed && !firewall.rackId; })()`), true);
 console.log('Rack connections and zone-free floor placement passed'); socket.close();

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { browserEvaluate } from './browser-storage.mjs';
 const pages = await (await fetch('http://127.0.0.1:9223/json/list')).json();
 const page = pages.find(p => p.type === 'page');
 const socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -6,8 +7,8 @@ await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror
 let id = 0; const pending = new Map();
 socket.onmessage = e => { const m = JSON.parse(e.data); if (pending.has(m.id)) { pending.get(m.id)(m.result); pending.delete(m.id); } };
 const send = (method, params = {}) => new Promise(resolve => { const n = ++id; pending.set(n, resolve); socket.send(JSON.stringify({ id: n, method, params })); });
-const evaluate = expression => send('Runtime.evaluate', { expression, returnByValue: true }).then(r => { if (r.exceptionDetails) throw Error(r.exceptionDetails.exception?.description); return r.result.value; });
-await send('Page.navigate', { url: 'http://127.0.0.1:5173/' });
+const evaluate = browserEvaluate(send);
+await send('Page.navigate', { url: 'http://127.0.0.1:5173/dist/' });
 await new Promise(r => setTimeout(r, 600));
 await evaluate(`localStorage.clear(); localStorage.setItem('titan-project-v1', JSON.stringify({name:'Legacy',floorName:'Ground',zones:[],assets:[{id:'a',name:'A',type:'access_point',placed:true,x:50,y:50}],cables:[]})); location.reload()`);
 await new Promise(r => setTimeout(r, 600));

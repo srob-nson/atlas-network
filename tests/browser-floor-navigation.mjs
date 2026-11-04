@@ -1,5 +1,6 @@
 // Run against a local preview and Chrome debugging port 9223. Uses and clears the preview browser storage.
 import assert from 'node:assert/strict';
+import { browserEvaluate } from './browser-storage.mjs';
 const pages = await (await fetch('http://127.0.0.1:9223/json/list')).json();
 const page = pages.find(p => p.url.startsWith('http://127.0.0.1:5173'));
 const socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -7,8 +8,8 @@ await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror
 let id = 0; const pending = new Map();
 socket.onmessage = e => { const m = JSON.parse(e.data); if (pending.has(m.id)) { pending.get(m.id)(m.result); pending.delete(m.id); } };
 const send = (method,params={}) => new Promise(resolve => { const n=++id; pending.set(n,resolve); socket.send(JSON.stringify({id:n,method,params})); });
-const evaluate = expression => send('Runtime.evaluate',{expression,returnByValue:true}).then(r => { if(r.exceptionDetails) throw Error(r.exceptionDetails.exception?.description); return r.result.value; });
-await send('Page.navigate', { url: 'http://127.0.0.1:5173/' }); await new Promise(r => setTimeout(r, 800));
+const evaluate = browserEvaluate(send);
+await send('Page.navigate', { url: 'http://127.0.0.1:5173/dist/' }); await new Promise(r => setTimeout(r, 800));
 await evaluate(`localStorage.removeItem('titan-workspace-v2'); localStorage.removeItem('titan-project-v1'); localStorage.setItem('network-atlas-project-v1', JSON.stringify({name:'Pan test',zones:[],assets:[{id:'ap',name:'Access point',type:'access_point',placed:true,x:50,y:50}],cables:[]})); location.reload()`);
 await new Promise(r => setTimeout(r, 800));
 assert.equal(await evaluate(`document.title`), 'Titan — Spatial network design');

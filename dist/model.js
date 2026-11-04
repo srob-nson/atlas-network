@@ -76,7 +76,7 @@ export function assignRacks(assets) {
 
 export function defaultPorts(type) {
   const count = type === 'switch' || type === 'patch_panel' ? 48 : type === 'router' || type === 'firewall' ? 4 : type === 'cabinet' ? 0 : 1;
-  return Array.from({ length: count }, (_, i) => ({ name: String(i + 1), speed: '1 Gbps' }));
+  return Array.from({ length: count }, (_, i) => ({ name: String(i + 1), speed: 'Unknown' }));
 }
 
 export function initializePorts(assets, cables) {
@@ -84,7 +84,7 @@ export function initializePorts(assets, cables) {
     if (!asset.ports) asset.ports = defaultPorts(asset.type);
     for (const cable of cables) {
       const name = cable.from === asset.id ? cable.fromPort : cable.to === asset.id ? cable.toPort : '';
-      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ name, speed: '1 Gbps' });
+      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ name, speed: 'Unknown' });
     }
   }
   return assets;
@@ -181,10 +181,11 @@ export function cableRoute(from, waypoints, to) {
 
 export function restoreHierarchy(input) {
   const invalid = () => { throw new Error('Invalid project file.'); };
+  if (input?.schemaVersion !== undefined && input.schemaVersion !== 1) throw new Error('Unsupported project schema version.');
   if (!input?.buildings) {
     const legacy = restoreProject(input);
     const { name, cables, ...floor } = legacy;
-    return { name, buildings: [{ id: 'building-1', name: 'Building 1', floors: [{ id: 'floor-1', ...floor }] }], cables };
+    return { schemaVersion: 1, name, buildings: [{ id: 'building-1', name: 'Building 1', floors: [{ id: 'floor-1', ...floor }] }], cables };
   }
   if (typeof input.name !== 'string' || !Array.isArray(input.buildings) || !input.buildings.length || !Array.isArray(input.cables)) invalid();
   const buildingIds = new Set(), floorIds = new Set(), assetIds = new Set();
@@ -210,7 +211,7 @@ export function restoreHierarchy(input) {
 
   }
   for (const building of buildings) for (const floor of building.floors) initializePorts(floor.assets, cables);
-  return { name: input.name, buildings, cables };
+  return { schemaVersion: 1, name: input.name, buildings, cables };
 }
 
 export function moveAssetToFloor(source, target, asset, cables) {
@@ -223,11 +224,5 @@ export function moveAssetToFloor(source, target, asset, cables) {
 }
 
 export function deployAsset(assets, asset, x, y) {
-  if (['switch', 'firewall', 'router'].includes(asset.type) && !asset.rackId) {
-    const rack = placeAsset({ id: crypto.randomUUID(), name: `${asset.name} rack`, type: 'cabinet', model: '', ip: '', managementUrl: '', rackId: '' }, [], x, y);
-    assets.push(rack);
-    Object.assign(asset, { rackId: rack.id, placed: false, x: null, y: null });
-  } else {
-    Object.assign(asset, { ...placeAsset(asset, [], x, y), zoneId: asset.zoneId || '' });
-  }
+  Object.assign(asset, { ...placeAsset(asset, [], x, y), zoneId: asset.zoneId || '' });
 }

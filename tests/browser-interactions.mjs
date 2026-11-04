@@ -1,5 +1,6 @@
 // Run against a local preview with Chrome's debugging port on 9223.
 import assert from 'node:assert/strict';
+import { browserEvaluate } from './browser-storage.mjs';
 
 const pages = await (await fetch('http://127.0.0.1:9223/json/list')).json();
 const page = pages.find(item => item.type === 'page' && item.url.startsWith('http://127.0.0.1:5173'));
@@ -18,11 +19,7 @@ socket.onmessage = event => {
 const send = (method, params = {}) => new Promise((resolve, reject) => {
   const id = ++next; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params }));
 });
-const evaluate = async expression => {
-  const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-  return result.result.value;
-};
+const evaluate = browserEvaluate(send);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const mouse = (type, x, y, buttons = 0) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1 });
 const assetPoint = () => evaluate(`(() => {
@@ -58,7 +55,7 @@ try {
   await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1);
   await mouse('mouseMoved', point.x + dx, point.y + dy, 1); await mouse('mouseReleased', point.x + dx, point.y + dy);
   let asset = await evaluate('JSON.parse(localStorage.getItem("titan-workspace-v2")).projects[0].buildings[0].floors[0].assets.find(a => a.id === "core")');
-  assert.ok(Math.abs(asset.x - 35) < 1 && Math.abs(asset.y - 24) < 1, 'dragging follows the pointer without jumping');
+  assert.ok(Math.abs(asset.x - 35) < 1 && Math.abs(asset.y - 24) < 1, `dragging follows the pointer without jumping: ${asset.x}, ${asset.y}`);
   assert.equal(asset.zoneId, 'network', 'dragging assigns the containing zone');
   assert.notEqual(await evaluate('document.querySelector("[data-cable=c2]").getAttribute("points")'), cableBefore, 'connected cable redraws');
   assert.equal(await evaluate('document.querySelector(".inspector").hidden'), false, 'dragging selects the device');

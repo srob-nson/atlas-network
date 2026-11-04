@@ -97,6 +97,7 @@ test('ports default by device type and survive restoration with legacy connectio
   assert.equal(defaultPorts('switch').length, 48);
   assert.equal(defaultPorts('router').length, 4);
   assert.equal(defaultPorts('firewall').length, 4);
+  assert.equal(defaultPorts('switch')[0].speed, 'Unknown');
   const input = { name: 'Ports', zones: [], assets: [
     { id: 'a', name: 'A', type: 'switch', ports: [{ name: 'SFP', speed: '10 Gbps' }] },
     { id: 'b', name: 'B', type: 'router' }
@@ -104,6 +105,7 @@ test('ports default by device type and survive restoration with legacy connectio
   const project = restoreProject(input);
   assert.deepEqual(project.assets[0].ports, [{ name: 'SFP', speed: '10 Gbps' }]);
   assert.ok(project.assets[1].ports.some(port => port.name === 'WAN'));
+  assert.equal(project.assets[1].ports.find(port => port.name === 'WAN').speed, 'Unknown');
   assert.deepEqual(restoreProject(project).assets[0].ports, project.assets[0].ports);
 });
 
@@ -164,24 +166,31 @@ test('moving equipment between floors preserves connections and clears floor-spe
   assert.deepEqual(cables[0].waypoints, []);
 });
 
-test('deploying rack-mounted equipment creates a floor rack without changing other devices', async () => {
+test('deploying equipment places it without creating a rack', async () => {
   const { deployAsset } = await import('../dist/model.js');
   for (const type of ['switch', 'firewall', 'router']) {
     const device = { id: type, name: type, type, placed: false, rackId: '' };
     const assets = [device];
     deployAsset(assets, device, 30, 40);
-    assert.equal(assets.length, 2);
-    assert.equal(assets[1].type, 'cabinet');
-    assert.equal(assets[1].placed, true);
-    assert.equal(assets[1].x, 30);
-    assert.equal(assets[1].y, 40);
-    assert.equal(device.rackId, assets[1].id);
-    assert.equal(device.placed, false);
+    assert.equal(assets.length, 1);
+    assert.equal(device.rackId, '');
+    assert.equal(device.placed, true);
+    assert.equal(device.x, 30);
+    assert.equal(device.y, 40);
   }
   const ap = { id: 'ap', name: 'AP', type: 'access_point', placed: false };
   const assets = [ap]; deployAsset(assets, ap, 10, 20);
   assert.equal(assets.length, 1);
   assert.equal(ap.placed, true);
+});
+
+test('legacy projects migrate to a versioned schema and future versions are rejected', async () => {
+  const { restoreHierarchy } = await import('../dist/model.js');
+  const legacy = { name: 'Legacy', zones: [], assets: [], cables: [] };
+  const migrated = restoreHierarchy(legacy);
+  assert.equal(migrated.schemaVersion, 1);
+  assert.deepEqual(restoreHierarchy(JSON.parse(JSON.stringify(migrated))), migrated);
+  assert.throws(() => restoreHierarchy({ ...migrated, schemaVersion: 2 }), /version/i);
 });
 
 test('inventory schema rejects ambiguous headers and oversized fields', () => {

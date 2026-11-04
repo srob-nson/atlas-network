@@ -1,4 +1,5 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=13';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreProject, restoreHierarchy, placeAsset, cableRoute, assignRacks, initializePorts, defaultPorts, moveAssetToFloor, deployAsset } from './model.js?v=14';
+import { loadWorkspace, storeWorkspace } from './storage.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -33,14 +34,20 @@ const demo = {
 };
 
 const workspaceKey = 'titan-workspace-v2';
-let workspace;
+let workspace, loadError = false, migrated = null;
 try {
-  const saved = localStorage.getItem(workspaceKey);
-  const legacy = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey);
-  const raw = saved ? JSON.parse(saved) : { projects: [legacy ? JSON.parse(legacy) : demo] };
+  let raw = await loadWorkspace();
+  if (!raw) {
+    const saved = localStorage.getItem(workspaceKey);
+    const legacy = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey);
+    raw = saved ? JSON.parse(saved) : { projects: [legacy ? JSON.parse(legacy) : demo] };
+    if (saved) migrated = [workspaceKey, saved];
+    else if (legacy) migrated = [localStorage.getItem(storageKey) !== null ? storageKey : legacyStorageKey, legacy];
+  }
   if (!Array.isArray(raw.projects) || !raw.projects.length) throw new Error('Invalid workspace');
-  workspace = { projects: raw.projects.map(restoreHierarchy), projectIndex: raw.projectIndex || 0, buildingIndex: raw.buildingIndex || 0, floorIndex: raw.floorIndex || 0 };
-} catch { workspace = { projects: [restoreHierarchy(demo)], projectIndex: 0, buildingIndex: 0, floorIndex: 0 }; }
+  const index = value => Number.isInteger(value) && value >= 0 ? value : 0;
+  workspace = { projects: raw.projects.map(restoreHierarchy), projectIndex: index(raw.projectIndex), buildingIndex: index(raw.buildingIndex), floorIndex: index(raw.floorIndex) };
+} catch { loadError = true; workspace = { projects: [restoreHierarchy(demo)], projectIndex: 0, buildingIndex: 0, floorIndex: 0 }; }
 let currentProject, building, floor, project;
 function selectFloor() {
   workspace.projectIndex = Math.min(workspace.projectIndex, workspace.projects.length - 1);
@@ -77,10 +84,26 @@ function toast(message, duration = 3500) {
   const element = $('#toast'); element.textContent = message; element.classList.add('visible');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => element.classList.remove('visible'), duration);
 }
+let saveQueue = Promise.resolve(), saveNumber = 0, unsaved = false;
 function save() {
-  try { localStorage.setItem(workspaceKey, JSON.stringify(workspace)); $('#save-status').textContent = 'Saved locally'; return true; }
-  catch { $('#save-status').textContent = 'Not saved — export project'; toast('Browser storage is full. Export your project to avoid losing changes.', 8000); return false; }
+  const number = ++saveNumber;
+  const snapshot = JSON.parse(JSON.stringify(workspace));
+  unsaved = true;
+  $('#save-status').textContent = 'Saving…';
+  const result = saveQueue.then(async () => {
+    if (loadError) throw new Error('Existing browser data could not be loaded.');
+    await storeWorkspace(snapshot);
+  }).then(() => {
+    if (number === saveNumber) { unsaved = false; $('#save-status').textContent = 'Saved locally'; }
+    return true;
+  }).catch(() => {
+    if (number === saveNumber) { $('#save-status').textContent = 'Not saved — export project'; toast('Could not save browser data. Export your projects before leaving.', 10000); }
+    return false;
+  });
+  saveQueue = result;
+  return result;
 }
+window.addEventListener('beforeunload', event => { if (unsaved) { event.preventDefault(); event.returnValue = ''; } });
 function assetById(id) { return project.assets.find(asset => asset.id === id); }
 function selectedAsset() { return selected.kind === 'asset' ? assetById(selected.id) : null; }
 function selectedCable() { return selected.kind === 'cable' ? project.cables.find(c => c.id === selected.id) : null; }
@@ -524,7 +547,7 @@ document.addEventListener('click', event => {
     case 'undo-outline': outlineDraft.pop(); renderScene(); break;
     case 'finish-outline':
       if (outlineDraft.length < 3) { toast('Choose at least three points for the outline.'); break; }
-      project.outline = outlineDraft.map(p => [...p]); outlineDraft = []; setMode('select'); save(); render(); toast('Floor outline saved.'); break;
+      project.outline = outlineDraft.map(p => [...p]); outlineDraft = []; setMode('select'); save(); render(); toast('Floor outline updated.'); break;
     case 'clear-outline': project.outline = []; save(); render(); toast('Floor outline reset.'); break;
     case 'import-project': $('#project-file').click(); break;
     case 'cancel-mode': outlineDraft = []; inspectorOpen = !!selected.id; setMode('select'); render(); break;
@@ -542,9 +565,7 @@ document.addEventListener('click', event => {
       break;
     case 'auto-place': {
       const before = project.assets.filter(a => a.placed).length;
-      const beforeIds = new Set(project.assets.filter(a => a.placed).map(a => a.id));
       project.assets = autoPlaceFloor(project.assets);
-      for (const item of [...project.assets]) if (item.placed && ['switch', 'firewall', 'router'].includes(item.type) && !item.rackId && !beforeIds.has(item.id)) deployAsset(project.assets, item, item.x, item.y);
       const count = project.assets.filter(a => a.placed).length - before;
       save(); render(); toast(count ? `Placed ${count} equipment item${count === 1 ? '' : 's'} on the floor plan.` : 'All floor equipment is already placed.'); break;
     }
@@ -567,7 +588,7 @@ document.addEventListener('click', event => {
     }
     case 'new-project': {
       const name = prompt('Project name', 'Untitled project')?.trim(); if (!name) break;
-      workspace.projects.push({ name: name.slice(0, 80), buildings: [{ id: uid(), name: 'Building 1', floors: [blankFloor()] }], cables: [] });
+      workspace.projects.push({ schemaVersion: 1, name: name.slice(0, 80), buildings: [{ id: uid(), name: 'Building 1', floors: [blankFloor()] }], cables: [] });
       workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); break;
     }
     case 'new-building': {
@@ -634,8 +655,8 @@ $('#inventory-file').addEventListener('change', async event => {
     if (file.size > 2_000_000) throw new Error('Inventory CSV must be smaller than 2 MB.');
     const result = parseInventory(await file.text(), project.zones, false);
     result.assets.filter(a => ['switch', 'firewall', 'router'].includes(a.type)).forEach(a => { a.rackId = ''; });
-    project.assets.push(...result.assets); if (result.assets.some(a => a.type === 'cabinet')) project.assets.forEach(a => { if (!a.rackId && !['switch', 'firewall', 'router'].includes(a.type)) delete a.rackId; }); project.assets = assignRacks(project.assets); save(); render();
-    toast(`Imported ${result.assets.length} equipment item${result.assets.length === 1 ? '' : 's'}.`);
+    project.assets.push(...result.assets); if (result.assets.some(a => a.type === 'cabinet')) project.assets.forEach(a => { if (!a.rackId && !['switch', 'firewall', 'router'].includes(a.type)) delete a.rackId; }); project.assets = assignRacks(project.assets); render();
+    if (await save()) toast(`Imported ${result.assets.length} equipment item${result.assets.length === 1 ? '' : 's'}.`);
     if (result.errors.length) alert(`Inventory notes:\n\n${result.errors.slice(0, 30).join('\n')}${result.errors.length > 30 ? `\n…and ${result.errors.length - 30} more.` : ''}`);
   } catch (error) { alert(error.message); }
   event.target.value = '';
@@ -647,7 +668,7 @@ $('#plan-file').addEventListener('change', async event => {
     if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP floor plan.');
     if (file.size > 2_000_000) throw new Error('Floor plan must be smaller than 2 MB for browser storage.');
     const image = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read the floor plan.')); reader.readAsDataURL(file); });
-    targetFloor.planImage = image; targetFloor.demo = false; save(); render(); toast('Floor plan uploaded.');
+    targetFloor.planImage = image; targetFloor.demo = false; render(); if (await save()) toast('Floor plan uploaded.');
   } catch (error) { alert(error.message); }
   event.target.value = '';
 });
@@ -656,7 +677,8 @@ $('#project-file').addEventListener('change', async event => {
   try {
     if (file.size > 50_000_000) throw new Error('Project file must be smaller than 50 MB.');
     const imported = restoreHierarchy(JSON.parse(await file.text()));
-    workspace.projects.push(imported); workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); toast('Project imported.');
+    workspace.projects.push(imported); workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); render();
+    if (await save()) toast('Project imported.');
   } catch (error) { alert(`Could not import project: ${error.message}`); }
   event.target.value = '';
 });
@@ -667,6 +689,10 @@ document.addEventListener('keydown', event => {
   else if (!$('.inspector').hidden) { selected = { kind: null, id: null }; inspectorOpen = false; render(); }
 });
 render();
+if (loadError) { unsaved = true; $('#save-status').textContent = 'Storage unavailable'; toast('Existing browser data could not be loaded. Saving is disabled to protect it.', 12000); }
+else if (migrated) save().then(saved => {
+  if (saved) try { if (localStorage.getItem(migrated[0]) === migrated[1]) localStorage.removeItem(migrated[0]); } catch { /* The IndexedDB copy is already committed. */ }
+});
 
 window.addEventListener('resize', drawRackCables);
 
