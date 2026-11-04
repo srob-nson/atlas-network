@@ -57,3 +57,5 @@
 #scene { cursor: grab; }
 #scene.dragging { cursor: grabbing; }
 .sidebar .field{margin:10px 4px 3px}.sidebar .field>span{color:#c1d0c6}.sidebar .field select{width:100%;background:#fff}.sidebar-content>.text-button{color:#c4e3ce;margin:0 4px 10px}
+
+.location-controls{display:grid;gap:10px;margin:0 0 26px}.location-control{display:flex;align-items:end;gap:4px}.sidebar .location-control .field{flex:1;min-width:0;margin:0}.sidebar .location-control select{appearance:none;background:#293d35 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b8cfc0' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center / 14px;border:1px solid #486154;color:#eff6f1;height:36px;padding-right:28px}.location-action{height:36px;width:26px;flex:none;border:1px solid #486154;border-radius:6px;background:#293d35;color:#c9dfd0;font-size:16px}.location-action:hover{background:#365246}.scene-wrap{height:max(500px,calc(100vh - 300px))}@media(max-width:740px){.location-controls{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:16px}.scene-wrap{height:60vh;min-height:380px}}

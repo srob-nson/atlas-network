@@ -141,3 +141,17 @@ test('project hierarchy migrates legacy data and validates cross-floor connectio
   assert.equal(restored.cables[0].to, 'b');
   assert.throws(() => restoreHierarchy({ ...migrated, cables: [{ id: 'x', from: 'a', to: 'missing' }] }), /invalid/i);
 });
+
+test('moving equipment between floors preserves connections and clears floor-specific placement', async () => {
+  const { moveAssetToFloor } = await import('../dist/model.js');
+  const device = { id: 'a', type: 'switch', rackId: 'r', zoneId: 'z', placed: true, x: 10, y: 20 };
+  const source = { assets: [device, { id: 'r', type: 'cabinet' }] }, target = { assets: [] };
+  const cables = [{ from: 'a', to: 'r', waypoints: [{ x: 10, y: 10 }] }];
+  moveAssetToFloor(source, target, device, cables);
+  assert.equal(source.assets.length, 1);
+  assert.equal(target.assets[0].id, 'a');
+  assert.equal(device.placed, false);
+  assert.equal(device.rackId, '');
+  assert.equal(device.zoneId, '');
+  assert.deepEqual(cables[0].waypoints, []);
+});

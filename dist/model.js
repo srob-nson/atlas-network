@@ -206,3 +206,12 @@ export function restoreHierarchy(input) {
   for (const building of buildings) for (const floor of building.floors) initializePorts(floor.assets, cables);
   return { name: input.name, buildings, cables };
 }
+
+export function moveAssetToFloor(source, target, asset, cables) {
+  if (source === target || !source.assets.includes(asset)) return;
+  source.assets = source.assets.filter(item => item !== asset);
+  source.assets.forEach(item => { if (item.rackId === asset.id) item.rackId = ''; });
+  Object.assign(asset, { rackId: '', zoneId: '', placed: false, x: null, y: null });
+  target.assets.push(asset);
+  cables.forEach(cable => { if (cable.from === asset.id || cable.to === asset.id) cable.waypoints = []; });
+}
