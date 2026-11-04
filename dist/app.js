@@ -67,7 +67,7 @@ function blankFloor(name = 'Ground floor') { return { id: uid(), floorName: name
 function resetSelection() { selected = { kind: null, id: null }; inspectorOpen = false; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; closeDialogs(); setMode('select'); }
 let rackView = '', rackDevice = '', pendingPort = null;
 let selected = { kind: null, id: null };
-const defaultZoom = 1.1;
+const defaultZoom = .9;
 let view = '3d', rotation = 0, zoom = defaultZoom, mode = 'select';
 let pan = { x: 0, y: 0 }, pointIndex = null;
 let drag = null, ignoreSceneClick = false, inspectorOpen = false, lastAssetClick = null, outlineDraft = [];

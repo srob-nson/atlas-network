@@ -15,7 +15,11 @@ assert.equal(await evaluate(`document.title`), 'Titan — Spatial network design
 assert.equal(await evaluate(`document.querySelector('#breadcrumb-project').textContent`), 'Pan test');
 await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
 await evaluate(`document.querySelector('#scene').scrollIntoView({block:'center'})`);
-assert.equal(await evaluate(`document.querySelector('#zoom-level').textContent`), '110%');
+await evaluate(`document.querySelector('[data-view="plan"]').click()`);
+const fits = await evaluate(`(() => { const scene = document.querySelector('#scene'), bounds = scene.getBoundingClientRect(), floor = scene.querySelector('[data-floor]').getBoundingClientRect(); return floor.left > bounds.left && floor.right < bounds.right && floor.top > bounds.top && floor.bottom < bounds.bottom; })()`);
+assert.ok(fits, 'the entire floor fits with space around it in plan view');
+await evaluate(`document.querySelector('[data-view="3d"]').click()`);
+assert.equal(await evaluate(`document.querySelector('#zoom-level').textContent`), '90%');
 const initial = await evaluate(`(() => { const s=document.querySelector('#scene'), p=new DOMPoint(500,286).matrixTransform(s.getScreenCTM()); return { x:p.x, y:p.y }; })()`);
 const target = await evaluate(`(() => { const s=document.querySelector('#scene'), p=new DOMPoint(500,205).matrixTransform(s.getScreenCTM()); return {x:p.x,y:p.y}; })()`);
 async function drag(a,b) { await send('Input.dispatchMouseEvent',{type:'mouseMoved',...a}); await send('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...a}); await send('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',buttons:1,clickCount:1,...b}); await send('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...b}); }
@@ -27,7 +31,7 @@ await drag(point,{x:point.x+15,y:point.y+8});
 const asset = await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors[0].assets[0]`);
 assert.ok(asset.x !== 50 || asset.y !== 50, 'dragging equipment still moves it');
 await evaluate(`document.querySelector('[data-action="reset-view"]').click()`);
-assert.equal(await evaluate(`document.querySelector('#zoom-level').textContent`), '110%');
+assert.equal(await evaluate(`document.querySelector('#zoom-level').textContent`), '90%');
 const reset = await evaluate(`(() => {const p=new DOMPoint(500,286).matrixTransform(document.querySelector('#scene').getScreenCTM());return {x:p.x,y:p.y}})()`);
 assert.ok(Math.hypot(reset.x-initial.x,reset.y-initial.y)<1, 'reset restores the initial position');
 for (const [ctrlKey, deltaY, deltaMode] of [[false, -120, 0], [true, -30, 0], [false, 3, 1]]) {
