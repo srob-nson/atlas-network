@@ -21,7 +21,7 @@ const send = (method, params = {}) => new Promise((resolve, reject) => {
 });
 const evaluate = browserEvaluate(send);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-const mouse = (type, x, y, buttons = 0) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1 });
+const mouse = async (type, x, y, buttons = 0) => { await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: 1 }); if (type === 'mouseMoved' && buttons) await wait(50); };
 const assetPoint = () => evaluate(`(() => {
   const svg = document.querySelector('#scene');
   const rect = svg.querySelector('[data-asset="core"] circle').getBoundingClientRect();
@@ -42,6 +42,7 @@ try {
   await evaluate('document.querySelector("[data-action=place-asset]").click()');
   assert.equal(await evaluate('document.querySelector(".inspector").hidden'), true, 'placement leaves the plan unobstructed');
   await evaluate('document.querySelector("[data-action=cancel-mode]").click()');
+  await wait(700);
   assert.equal(await evaluate('document.querySelector(".inspector").hidden'), false, 'cancelling placement restores details');
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   assert.equal(await evaluate('document.querySelector(".inspector").hidden'), true, 'Escape closes details');

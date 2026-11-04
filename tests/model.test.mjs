@@ -16,7 +16,7 @@ test('OT endpoints import and restore without being automatically put in a rack'
   const imported = parseInventory('name,type,ip\nCamera,ip_camera,10.0.0.5\nController,plc,10.0.0.6\nOther,other,10.0.0.7', []);
   assert.deepEqual(imported.errors, []);
   const restored = restoreProject({ name: 'OT', zones: [], assets: [{ id: 'rack', name: 'Rack', type: 'cabinet' }, ...imported.assets], cables: [] });
-  assert.deepEqual(restored.assets.slice(1).map(a => [a.type, a.rackId, a.ports.length]), [['ip_camera', '', 1], ['plc', '', 1], ['other', '', 1]]);
+  assert.deepEqual(restored.assets.slice(1).map(a => [a.type, a.rackId, a.ports.length]), [['ip_camera', '', 0], ['plc', '', 0], ['other', '', 0]]);
   assert.equal(restoreProject(JSON.parse(JSON.stringify(restored))).assets[1].ip, '10.0.0.5');
 });
 
@@ -92,18 +92,13 @@ test('rack assignments and connection details survive project restore', async ()
   assert.deepEqual([project.cables[0].fromPort, project.cables[0].toPort, project.cables[0].label, project.cables[0].color], ['1', 'WAN', 'Uplink', '#123456']);
 });
 
-test('ports default by device type and survive restoration with legacy connections', async () => {
-  const { defaultPorts } = await import('../dist/model.js');
-  assert.equal(defaultPorts('switch').length, 48);
-  assert.equal(defaultPorts('router').length, 4);
-  assert.equal(defaultPorts('firewall').length, 4);
-  assert.equal(defaultPorts('switch')[0].speed, 'Unknown');
+test('specified ports survive restoration and legacy named endpoints are retained', async () => {
   const input = { name: 'Ports', zones: [], assets: [
     { id: 'a', name: 'A', type: 'switch', ports: [{ name: 'SFP', speed: '10 Gbps' }] },
     { id: 'b', name: 'B', type: 'router' }
   ], cables: [{ id: 'c', from: 'a', to: 'b', fromPort: 'SFP', toPort: 'WAN' }] };
   const project = restoreProject(input);
-  assert.deepEqual(project.assets[0].ports, [{ name: 'SFP', speed: '10 Gbps' }]);
+  assert.deepEqual([project.assets[0].ports[0].name, project.assets[0].ports[0].speed, project.assets[0].ports[0].media], ['SFP', '10 Gbps', 'Unknown']);
   assert.ok(project.assets[1].ports.some(port => port.name === 'WAN'));
   assert.equal(project.assets[1].ports.find(port => port.name === 'WAN').speed, 'Unknown');
   assert.deepEqual(restoreProject(project).assets[0].ports, project.assets[0].ports);
@@ -190,7 +185,7 @@ test('legacy projects migrate to a versioned schema and future versions are reje
   const migrated = restoreHierarchy(legacy);
   assert.equal(migrated.schemaVersion, 1);
   assert.deepEqual(restoreHierarchy(JSON.parse(JSON.stringify(migrated))), migrated);
-  assert.throws(() => restoreHierarchy({ ...migrated, schemaVersion: 2 }), /version/i);
+  assert.throws(() => restoreHierarchy({ ...migrated, schemaVersion: 3 }), /version/i);
 });
 
 test('inventory schema rejects ambiguous headers and oversized fields', () => {

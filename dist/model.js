@@ -52,20 +52,20 @@ export function parseInventory(text, zones, reportZones = true) {
       errors.push(`Row ${index + 2}: ${!row.name ? 'name is required' : `unsupported type “${row.type}”`}.`);
       return;
     }
-    const tooLong = [['name', 80], ['model', 120], ['ip', 80], ['management_url', 500], ['url', 500]].find(([key, limit]) => (row[key] || '').length > limit);
+    const tooLong = [['name', 80], ['vendor', 120], ['model', 120], ['ip', 80], ['management_url', 500], ['url', 500]].find(([key, limit]) => (row[key] || '').length > limit);
     if (tooLong) { errors.push(`Row ${index + 2}: ${tooLong[0]} exceeds ${tooLong[1]} characters.`); return; }
     const zone = zones.find(z => z.name.toLowerCase() === (row.zone || '').toLowerCase());
     const link = row.management_url || row.url || '';
     if (reportZones && row.zone && !zone) errors.push(`Row ${index + 2}: zone “${row.zone}” was not found; assign it after import.`);
     if (link && !safeManagementUrl(link)) errors.push(`Row ${index + 2}: invalid management URL was omitted.`);
-    assets.push({ id: crypto.randomUUID(), name: row.name, type, zoneId: zone?.id || '', ip: row.ip || '', managementUrl: safeManagementUrl(link), model: row.model || '', placed: false });
+    assets.push({ id: crypto.randomUUID(), name: row.name, type, zoneId: zone?.id || '', ip: row.ip || '', managementUrl: safeManagementUrl(link), vendor: row.vendor || '', model: row.model || '', placed: false, rackId: '', ports: [] });
   });
   return { assets, errors };
 }
 
 export function assignRacks(assets) {
   return assets.map(asset => {
-    if (asset.type === 'cabinet' || asset.type === 'access_point') return { ...asset, rackId: '' };
+    if (asset.type === 'cabinet') return { ...asset, rackId: '' };
     if (asset.rackId !== undefined) return { ...asset };
     if (!['switch', 'router', 'firewall', 'patch_panel'].includes(asset.type)) return { ...asset, rackId: '' };
     const cabinets = assets.filter(a => a.type === 'cabinet');
@@ -74,20 +74,42 @@ export function assignRacks(assets) {
   });
 }
 
-export function defaultPorts(type) {
-  const count = type === 'switch' || type === 'patch_panel' ? 48 : type === 'router' || type === 'firewall' ? 4 : type === 'cabinet' ? 0 : 1;
-  return Array.from({ length: count }, (_, i) => ({ name: String(i + 1), speed: 'Unknown' }));
-}
-
 export function initializePorts(assets, cables) {
   for (const asset of assets) {
-    if (!asset.ports) asset.ports = defaultPorts(asset.type);
+    if (!asset.ports) asset.ports = [];
+    for (const port of asset.ports) { port.id ||= crypto.randomUUID(); port.media ??= 'Unknown'; }
     for (const cable of cables) {
       const name = cable.from === asset.id ? cable.fromPort : cable.to === asset.id ? cable.toPort : '';
-      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ name, speed: 'Unknown' });
+      if (name && !asset.ports.some(port => port.name.toLowerCase() === name.toLowerCase())) asset.ports.push({ id: crypto.randomUUID(), name, speed: 'Unknown', media: 'Unknown' });
     }
   }
   return assets;
+}
+
+export function configurePorts(device, count, cables) {
+  if (!Number.isInteger(count) || count < 0 || count > 512) throw new Error('Port count must be between 0 and 512.');
+  const ports = device.ports || [];
+  if (ports.slice(count).some(port => cables.some(c => (c.from === device.id && (c.fromPortId === port.id || c.fromPort?.toLowerCase() === port.name.toLowerCase())) || (c.to === device.id && (c.toPortId === port.id || c.toPort?.toLowerCase() === port.name.toLowerCase()))))) throw new Error('Connected ports cannot be removed.');
+  const next = ports.slice(0, count);
+  while (next.length < count) {
+    let n = next.length + 1;
+    while (next.some(port => port.name.toLowerCase() === String(n).toLowerCase())) n++;
+    next.push({ id: crypto.randomUUID(), name: String(n), speed: 'Unknown', media: 'Unknown' });
+  }
+  device.ports = next;
+}
+
+export function assignRack(assets, device, rackId, start, height) {
+  if (!rackId) { Object.assign(device, { rackId: '', rackStart: null, rackHeight: null }); return; }
+  const rack = assets.find(a => a.id === rackId && a.type === 'cabinet');
+  if (!rack || device.type === 'cabinet' || device.id === rackId) throw new Error('Choose a valid rack.');
+  if (!Number.isInteger(rack.rackUnits) || rack.rackUnits < 1) throw new Error('Set the rack capacity first.');
+  if (!Number.isInteger(start) || !Number.isInteger(height) || start < 1 || height < 1 || start + height - 1 > rack.rackUnits) throw new Error('Position exceeds rack capacity.');
+  for (const other of assets.filter(a => a.id !== device.id && a.rackId === rackId)) {
+    if (!Number.isInteger(other.rackStart) || !Number.isInteger(other.rackHeight)) throw new Error('Rack occupancy is unknown; set existing positions first.');
+    if (start < other.rackStart + other.rackHeight && other.rackStart < start + height) throw new Error('Rack units are occupied.');
+  }
+  Object.assign(device, { rackId, rackStart: start, rackHeight: height });
 }
 
 export function canConnectPorts(assets, cables, rackId, from, fromPort, to, toPort) {
@@ -145,22 +167,24 @@ export function restoreProject(input) {
   const assets = input.assets.map(asset => {
     if (!asset || typeof asset.id !== 'string' || !asset.id || ids.has(asset.id) || typeof asset.name !== 'string' || !TYPES.includes(asset.type) || (asset.placed && (!Number.isFinite(asset.x) || !Number.isFinite(asset.y) || asset.x < 0 || asset.y < 0 || asset.x > 100 || asset.y > 100))) invalid();
     ids.add(asset.id);
-    return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null };
+    for (const key of ['rackUnits', 'rackStart', 'rackHeight']) if (asset[key] != null && (!Number.isInteger(asset[key]) || asset[key] < 1 || asset[key] > 512)) invalid();
+    return { id: asset.id, name: asset.name, type: asset.type, zoneId: zones.some(zone => zone.id === asset.zoneId) ? asset.zoneId : '', ip: String(asset.ip || ''), vendor: String(asset.vendor || ''), model: String(asset.model || ''), managementUrl: safeManagementUrl(asset.managementUrl), placed: !!asset.placed, x: asset.placed ? asset.x : null, y: asset.placed ? asset.y : null, rackUnits: asset.rackUnits ?? null, rackStart: asset.rackStart ?? null, rackHeight: asset.rackHeight ?? null };
   });
   for (const asset of assets) {
     const original = input.assets.find(a => a.id === asset.id);
     if (original.ports !== undefined) {
-      if (!Array.isArray(original.ports) || original.ports.length > 512 || original.ports.some(p => !p || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80 || typeof p.speed !== 'string' || p.speed.length > 80) || new Set(original.ports.map(p => p.name.toLowerCase())).size !== original.ports.length) invalid();
-      asset.ports = original.ports.map(({ name, speed }) => ({ name, speed }));
+      if (!Array.isArray(original.ports) || original.ports.length > 512 || original.ports.some(p => !p || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80 || typeof p.speed !== 'string' || p.speed.length > 80 || (p.id !== undefined && (typeof p.id !== 'string' || !p.id)) || (p.media !== undefined && (typeof p.media !== 'string' || p.media.length > 80))) || new Set(original.ports.map(p => p.name.toLowerCase())).size !== original.ports.length) invalid();
+      asset.ports = original.ports.map(({ id, name, speed, media }) => ({ id: id || crypto.randomUUID(), name, speed, media: media ?? 'Unknown' }));
     }
     if (original.rackId !== undefined) asset.rackId = assets.some(a => a.id === original.rackId && a.type === 'cabinet' && a.id !== asset.id) ? original.rackId : '';
   }
   const assignedAssets = assignRacks(assets);
   const cables = input.cables.map(cable => {
     if (!cable || typeof cable.id !== 'string' || !ids.has(cable.from) || !ids.has(cable.to) || cable.from === cable.to) invalid();
+    if (['fromPort', 'toPort'].some(key => cable[key] != null && (typeof cable[key] !== 'string' || cable[key].length > 80))) invalid();
     const waypoints = cable.waypoints === undefined ? [] : cable.waypoints;
     if (!Array.isArray(waypoints) || !waypoints.every(p => p && ['x', 'y'].every(k => Number.isFinite(p[k]) && p[k] >= 0 && p[k] <= 100 && p[k] % 5 === 0))) invalid();
-    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667' };
+    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), fromPortId: cable.fromPortId || null, toPortId: cable.toPortId || null, label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667' };
   });
   initializePorts(assignedAssets, cables);
   const outline = input.outline === undefined ? [] : input.outline;
@@ -179,13 +203,66 @@ export function cableRoute(from, waypoints, to) {
   return route;
 }
 
+export function serializeProject(project) {
+  const devices = [], racks = [], ports = [];
+  const buildings = project.buildings.map(building => ({ ...building, floors: building.floors.map(floor => {
+    for (const asset of floor.assets) {
+      const { ports: interfaces = [], ...entity } = asset;
+      (asset.type === 'cabinet' ? racks : devices).push({ ...entity, floorId: floor.id });
+      ports.push(...interfaces.map(port => ({ ...port, deviceId: asset.id })));
+    }
+    const { assets, ...rest } = floor;
+    return rest;
+  }) }));
+  const endpoint = (deviceId, portId, name) => ({ deviceId, portId: portId || ports.find(p => p.deviceId === deviceId && p.name.toLowerCase() === (name || '').toLowerCase())?.id || null });
+  const connections = project.cables.map(({ from, to, fromPort, toPort, fromPortId, toPortId, ...cable }) => ({ ...cable, from: endpoint(from, fromPortId, fromPort), to: endpoint(to, toPortId, toPort) }));
+  return { schemaVersion: 2, name: project.name, buildings, devices, racks, ports, connections };
+}
+
+function restoreEntities(input) {
+  const invalid = () => { throw new Error('Invalid project file.'); };
+  if (![input.buildings, input.devices, input.racks, input.ports, input.connections].every(Array.isArray)) invalid();
+  const entities = [...input.devices, ...input.racks];
+  if (input.devices.some(a => a.type === 'cabinet') || input.racks.some(a => a.type !== 'cabinet')) invalid();
+  if (new Set(entities.map(a => a.id)).size !== entities.length) invalid();
+  const floorIds = new Set(input.buildings.flatMap(b => Array.isArray(b.floors) ? b.floors.map(f => f.id) : []));
+  if (entities.some(a => !floorIds.has(a.floorId))) invalid();
+  for (const device of input.devices) {
+    if (!device.rackId) continue;
+    const rack = input.racks.find(r => r.id === device.rackId && r.floorId === device.floorId);
+    if (!rack || ((device.rackStart == null) !== (device.rackHeight == null))) invalid();
+    if (device.rackStart != null) {
+      if (!Number.isInteger(device.rackStart) || !Number.isInteger(device.rackHeight) || device.rackStart < 1 || device.rackHeight < 1 || (rack.rackUnits != null && device.rackStart + device.rackHeight - 1 > rack.rackUnits)) invalid();
+      if (input.devices.some(other => other !== device && other.rackId === device.rackId && other.rackStart != null && other.rackHeight != null && device.rackStart < other.rackStart + other.rackHeight && other.rackStart < device.rackStart + device.rackHeight)) invalid();
+    }
+  }
+  const portIds = new Set();
+  for (const port of input.ports) {
+    if (!port || typeof port.id !== 'string' || !port.id || portIds.has(port.id) || !entities.some(a => a.id === port.deviceId)) invalid();
+    portIds.add(port.id);
+  }
+  const buildings = input.buildings.map(b => ({ ...b, floors: b.floors.map(f => ({ ...f, assets: entities.filter(a => a.floorId === f.id).map(({ floorId, ...asset }) => ({ ...asset, ports: input.ports.filter(p => p.deviceId === asset.id).map(({ deviceId, ...port }) => port) })) })) }));
+  const connections = input.connections.map(({ from, to, ...cable }) => {
+    const endpoint = value => {
+      if (!value || !entities.some(a => a.id === value.deviceId)) invalid();
+      const port = value.portId === null ? null : input.ports.find(p => p.id === value.portId && p.deviceId === value.deviceId);
+      if (value.portId !== null && !port) invalid();
+      return { device: value.deviceId, id: value.portId, name: port?.name || '' };
+    };
+    const a = endpoint(from), b = endpoint(to);
+    return { ...cable, from: a.device, to: b.device, fromPort: a.name, toPort: b.name, fromPortId: a.id, toPortId: b.id };
+  });
+  return { schemaVersion: 1, name: input.name, buildings, cables: connections };
+}
+
 export function restoreHierarchy(input) {
   const invalid = () => { throw new Error('Invalid project file.'); };
+  if (input?.schemaVersion === 2) input = restoreEntities(input);
   if (input?.schemaVersion !== undefined && input.schemaVersion !== 1) throw new Error('Unsupported project schema version.');
   if (!input?.buildings) {
     const legacy = restoreProject(input);
     const { name, cables, ...floor } = legacy;
-    return { schemaVersion: 1, name, buildings: [{ id: 'building-1', name: 'Building 1', floors: [{ id: 'floor-1', ...floor }] }], cables };
+    input = { schemaVersion: 1, name, buildings: [{ id: 'building-1', name: 'Building 1', floors: [{ id: 'floor-1', ...floor }] }], cables };
   }
   if (typeof input.name !== 'string' || !Array.isArray(input.buildings) || !input.buildings.length || !Array.isArray(input.cables)) invalid();
   const buildingIds = new Set(), floorIds = new Set(), assetIds = new Set();
@@ -211,14 +288,20 @@ export function restoreHierarchy(input) {
 
   }
   for (const building of buildings) for (const floor of building.floors) initializePorts(floor.assets, cables);
+  const allPorts = assets.flatMap(asset => asset.ports);
+  if (new Set(allPorts.map(port => port.id)).size !== allPorts.length) invalid();
+  for (const cable of cables) for (const side of ['from', 'to']) {
+    const portId = cable[`${side}PortId`];
+    if (portId && !assets.find(asset => asset.id === cable[side])?.ports.some(port => port.id === portId && (!cable[`${side}Port`] || port.name.toLowerCase() === cable[`${side}Port`].toLowerCase()))) invalid();
+  }
   return { schemaVersion: 1, name: input.name, buildings, cables };
 }
 
 export function moveAssetToFloor(source, target, asset, cables) {
   if (source === target || !source.assets.includes(asset)) return;
   source.assets = source.assets.filter(item => item !== asset);
-  source.assets.forEach(item => { if (item.rackId === asset.id) item.rackId = ''; });
-  Object.assign(asset, { rackId: '', zoneId: '', placed: false, x: null, y: null });
+  source.assets.forEach(item => { if (item.rackId === asset.id) Object.assign(item, { rackId: '', rackStart: null, rackHeight: null }); });
+  Object.assign(asset, { rackId: '', rackStart: null, rackHeight: null, zoneId: '', placed: false, x: null, y: null });
   target.assets.push(asset);
   cables.forEach(cable => { if (cable.from === asset.id || cable.to === asset.id) cable.waypoints = []; });
 }

@@ -10,15 +10,17 @@ const send = (method, params = {}) => new Promise(resolve => { const n = ++id; p
 const evaluate = browserEvaluate(send);
 await send('Page.navigate', { url: 'http://127.0.0.1:5173/dist/' });
 await new Promise(r => setTimeout(r, 600));
-await evaluate(`localStorage.clear(); localStorage.setItem('titan-project-v1', JSON.stringify({name:'Legacy',floorName:'Ground',zones:[],assets:[{id:'a',name:'A',type:'access_point',placed:true,x:50,y:50}],cables:[]})); location.reload()`);
+await evaluate(`localStorage.clear(); localStorage.setItem('titan-project-v1', JSON.stringify({name:'Legacy',floorName:'Ground',zones:[],assets:[{id:'a',name:'A',type:'access_point',placed:true,x:50,y:50,ports:[{name:'1',speed:'Unknown'}]}],cables:[]})); location.reload()`);
 await new Promise(r => setTimeout(r, 600));
 assert.equal(await evaluate(`document.querySelector('#breadcrumb-project').textContent`), 'Legacy');
 await evaluate(`window.prompt = () => 'Upper'; document.querySelector('[data-action="new-floor"]').click()`);
 assert.equal(await evaluate(`document.querySelector('#floor-select').options.length`), 2);
 await evaluate(`document.querySelector('[data-action="add-asset"]').click()`);
+await evaluate(`{const e=document.querySelector('[name="portCount"]');e.value='1';e.dispatchEvent(new Event('change',{bubbles:true}));}`);
 await evaluate(`document.querySelector('#floor-select').value='0'; document.querySelector('#floor-select').dispatchEvent(new Event('change',{bubbles:true})); document.querySelector('[data-asset="a"]').dispatchEvent(new MouseEvent('click',{bubbles:true}))`);
 assert.equal(await evaluate(`document.querySelectorAll('#cross-floor-connect option').length`), 2);
 await evaluate(`{const e=document.querySelector('#cross-floor-connect');e.selectedIndex=1;e.dispatchEvent(new Event('change',{bubbles:true}));}`);
+await evaluate(`{for(const id of ['connect-from','connect-destination']) document.getElementById(id).selectedIndex=1; document.querySelector('#connect-form').requestSubmit();}`);
 assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].cables.length`), 1);
 assert.equal(await evaluate(`document.querySelectorAll('[data-cable]').length`), 1);
 await evaluate(`location.reload()`); await new Promise(r => setTimeout(r,600));
@@ -30,7 +32,7 @@ await evaluate(`window.prompt = () => 'Second project'; document.querySelector('
 assert.equal(await evaluate(`document.querySelector('#project-select').options.length`), 2);
 await evaluate(`document.querySelector('#project-select').value='0'; document.querySelector('#project-select').dispatchEvent(new Event('change',{bubbles:true}))`);
 assert.equal(await evaluate(`document.querySelector('#building-select').options.length`), 2);
-await evaluate(`localStorage.setItem('titan-workspace-v2', JSON.stringify({projects:[{name:'Ports',buildings:[{id:'b',name:'Building',floors:[{id:'f1',floorName:'One',zones:[],assets:[{id:'r',name:'Rack',type:'cabinet',placed:true,x:20,y:20},{id:'s1',name:'Switch one',type:'switch',rackId:'r',placed:false}]},{id:'f2',floorName:'Two',zones:[],assets:[{id:'s2',name:'Switch two',type:'switch',placed:false}]}]}],cables:[]}]})); location.reload()`);
+await evaluate(`localStorage.setItem('titan-workspace-v2', JSON.stringify({projects:[{name:'Ports',buildings:[{id:'b',name:'Building',floors:[{id:'f1',floorName:'One',zones:[],assets:[{id:'r',name:'Rack',type:'cabinet',placed:true,x:20,y:20},{id:'s1',name:'Switch one',type:'switch',rackId:'r',placed:false,ports:[{name:'1',speed:'Unknown'},{name:'2',speed:'Unknown'}]}]},{id:'f2',floorName:'Two',zones:[],assets:[{id:'s2',name:'Switch two',type:'switch',placed:false,ports:[{name:'1',speed:'Unknown'}]}]}]}],cables:[]}]})); location.reload()`);
 await new Promise(r => setTimeout(r,600));
 await evaluate(`document.querySelector('[data-action="show-racks"]').click(); document.querySelector('[data-rack-open="r"]').click()`);
 // Keyboard activation follows the accessible single-press path.

@@ -34,7 +34,7 @@ try {
   await send('Runtime.enable'); await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   originalProject = await evaluate('localStorage.getItem("titan-workspace-v2")');
-  await evaluate(`localStorage.setItem('titan-workspace-v2', JSON.stringify({projects:[{name:'Test',buildings:[{id:'b',name:'Building',floors:[{id:'f',floorName:'Floor',zones:[],assets:[{id:'a',name:'A',type:'access_point',placed:true,x:20,y:20},{id:'b',name:'B',type:'access_point',placed:true,x:70,y:70},{id:'c',name:'C',type:'access_point',placed:true,x:70,y:20}]}]}],cables:[]}]})); location.reload()`); await wait(600);
+  await evaluate(`localStorage.setItem('titan-workspace-v2', JSON.stringify({projects:[{name:'Test',buildings:[{id:'b',name:'Building',floors:[{id:'f',floorName:'Floor',zones:[],assets:[{id:'a',name:'A',type:'access_point',placed:true,x:20,y:20,ports:[{name:'1',speed:'Unknown'}]},{id:'b',name:'B',type:'access_point',placed:true,x:70,y:70,ports:[{name:'1',speed:'Unknown'},{name:'2',speed:'Unknown'}]},{id:'c',name:'C',type:'access_point',placed:true,x:70,y:20,ports:[{name:'1',speed:'Unknown'}]}]}]}],cables:[]}]})); location.reload()`); await wait(600);
   async function doubleClick(id) {
     for (let count = 1; count <= 2; count++) {
       const p = await evaluate(`(() => { const r = document.querySelector('[data-asset="${id}"] circle').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
@@ -45,11 +45,13 @@ try {
   await doubleClick('a');
   assert.match(await evaluate(`document.querySelector('#hint-text').textContent`), /double.click/i);
   await doubleClick('b');
+  await evaluate(`{for(const id of ['connect-from','connect-destination']) document.getElementById(id).selectedIndex=1; document.querySelector('#connect-form').requestSubmit();}`);
   assert.equal((await cables()).length, 1, 'double clicks connect equipment with inspector initially closed');
   await doubleClick('b'); await doubleClick('c');
+  await evaluate(`{for(const id of ['connect-from','connect-destination']) document.getElementById(id).selectedIndex=1; document.querySelector('#connect-form').requestSubmit();}`);
   assert.equal((await cables()).length, 2, 'double clicks connect equipment with inspector open');
   await doubleClick('b'); await doubleClick('c');
-  assert.equal((await cables()).length, 2, 'duplicate connections are rejected');
+  assert.equal((await cables()).length, 2, 'connections require free interfaces');
   console.log('Floor double-click connections passed.');
 } finally {
   if (originalProject !== undefined) await evaluate(`{ const value = ${JSON.stringify(originalProject)}; if (value === null) localStorage.removeItem("titan-workspace-v2"); else localStorage.setItem("titan-workspace-v2", value); location.reload(); }`);
