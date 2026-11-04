@@ -1,6 +1,7 @@
-import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreHierarchy, serializeProject, configurePorts, assignRack, placeAsset, cableRoute, assignRacks, initializePorts, moveAssetToFloor, deployAsset } from './model.js?v=16';
+import { TYPES, parseInventory, autoPlaceFloor, safeManagementUrl, restoreHierarchy, serializeProject, configurePorts, assignRack, placeAsset, cableRoute, assignRacks, initializePorts, moveAssetToFloor, deployAsset } from './model.js?v=17';
 import { loadWorkspace, storeWorkspace } from './storage.js';
 import { validateProject } from './validation.js?v=1';
+import { estimateRoute, reviewRoute, routeStatus, compassAngle } from './physical.js?v=1';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -46,7 +47,7 @@ try {
     else if (legacy) migrated = [localStorage.getItem(storageKey) !== null ? storageKey : legacyStorageKey, legacy];
   }
   if (!Array.isArray(raw.projects) || !raw.projects.length) throw new Error('Invalid workspace');
-  upgrade = raw.projects.some(p => p.schemaVersion !== 3);
+  upgrade = raw.projects.some(p => p.schemaVersion !== 4);
   const index = value => Number.isInteger(value) && value >= 0 ? value : 0;
   workspace = { projects: raw.projects.map(restoreHierarchy), projectIndex: index(raw.projectIndex), buildingIndex: index(raw.buildingIndex), floorIndex: index(raw.floorIndex) };
 } catch { loadError = true; workspace = { projects: [restoreHierarchy(demo)], projectIndex: 0, buildingIndex: 0, floorIndex: 0 }; }
@@ -72,14 +73,15 @@ function assetLocation(id) { return allFloors().find(({ floor }) => floor.assets
 function globalAsset(id) { return allAssets().find(a => a.id === id); }
 function locationName(id) { const at = assetLocation(id); return at ? `${at.building.name} / ${at.floor.floorName}` : 'Unknown'; }
 function crossFloor(cable) { return assetLocation(cable.from)?.floor !== assetLocation(cable.to)?.floor; }
-function blankFloor(name = 'Ground floor') { return { id: uid(), floorName: name, planImage: '', demo: false, zones: [], assets: [] }; }
-function resetSelection() { selected = { kind: null, id: null }; inspectorOpen = false; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; closeDialogs(); setMode('select'); }
+function blankFloor(name = 'Ground floor') { return { id: uid(), floorName: name, planImage: '', demo: false, scale: null, northDegrees: null, layoutRevision: 0, zones: [], assets: [] }; }
+function reviseFloor(item) { item.layoutRevision = item.layoutRevision === Number.MAX_SAFE_INTEGER ? 0 : item.layoutRevision + 1; }
+function resetSelection() { selected = { kind: null, id: null }; inspectorOpen = false; rotation = 0; zoom = defaultZoom; pan = { x: 0, y: 0 }; pathwayDraft = []; closeDialogs(); setMode('select'); }
 let rackView = '', rackDevice = '', pendingPort = null;
 let selected = { kind: null, id: null };
 const defaultZoom = .9;
 let view = '3d', rotation = 0, zoom = defaultZoom, mode = 'select';
 let pan = { x: 0, y: 0 }, pointIndex = null;
-let drag = null, ignoreSceneClick = false, inspectorOpen = false, lastAssetClick = null, outlineDraft = [];
+let drag = null, ignoreSceneClick = false, inspectorOpen = false, lastAssetClick = null, outlineDraft = [], pathwayDraft = [], editingPathway = '';
 let toastTimer;
 
 function toast(message, duration = 3500) {
@@ -115,6 +117,7 @@ function setMode(next, message) {
   $('#hint-text').textContent = message || 'Drag the floor to pan · drag equipment to move it';
   $('#cancel-mode').hidden = next === 'select';
   $('#outline-controls').hidden = next !== 'outline';
+  $('#pathway-controls').hidden = next !== 'pathway';
   $('#scene').style.cursor = next === 'select' ? '' : 'crosshair';
 }
 
@@ -124,7 +127,12 @@ function render() {
   $('#floor-select').innerHTML = building.floors.map((f, i) => `<option value="${i}" ${i === workspace.floorIndex ? 'selected' : ''}>${esc(f.floorName)}</option>`).join('');
   $('#floor-eyebrow').textContent = project.floorName.toUpperCase();
   $('#breadcrumb-project').textContent = project.name;
-  $('#canvas-subtitle').textContent = `${project.floorName} · ${view === '3d' ? '3D view' : 'Plan view'}`;
+  $('#canvas-subtitle').textContent = `${project.floorName} · ${view === '3d' ? 'Illustrative angled view' : 'Plan view'}`;
+  $('#scene-caption').textContent = view === '3d' ? 'ILLUSTRATIVE ANGLED VIEW · NOT TO SCALE' : 'PLAN VIEW · NOT TO SCALE';
+  const angle = compassAngle(floor.northDegrees, rotation, view);
+  $('#compass-label').textContent = angle === null ? 'North unknown' : 'N';
+  $('#compass-arrow').hidden = angle === null;
+  if (angle !== null) $('#compass-arrow').style.transform = `rotate(${angle}deg)`;
   $('#side-asset-count').textContent = String(allAssets().length).padStart(2, '0');
   $('#side-rack-count').textContent = String(project.assets.filter(a => a.type === 'cabinet').length).padStart(2, '0');
   $('#side-cable-count').textContent = String(project.cables.length).padStart(2, '0');
@@ -157,9 +165,9 @@ function renderInspector() {
   $('.inspector').hidden = !inspectorOpen || (!asset && !cable);
   if (asset) {
     const url = safeManagementUrl(asset.managementUrl);
-    target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.rackId ? 'In rack' : asset.placed ? 'Placed on plan' : 'Ready to place'}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Building / floor</span><select id="asset-floor">${allFloors().map(({building: b, floor: f}) => `<option value="${esc(f.id)}" ${f === floor ? 'selected' : ''}>${esc(b.name)} / ${esc(f.floorName)}</option>`).join('')}</select></label><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label>${asset.type !== 'cabinet' ? `<label class="field"><span>Cabinet / rack</span><select name="rackId"><option value="">Unassigned</option>${project.assets.filter(a => a.type === 'cabinet').map(a => `<option value="${esc(a.id)}" ${asset.rackId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>` : ''}${rackFields(asset)}<label class="field"><span>Vendor</span><input name="vendor" value="${esc(asset.vendor)}" maxlength="120"></label><label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label>${engineeringFields(asset)}<label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label>${portFields(asset)}</form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions">${!asset.rackId ? `<button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button>` : ''}${asset.type === 'cabinet' ? `<button class="detail-button" data-rack-open="${esc(asset.id)}">${icon('layers')} Open rack view</button>` : ''}<button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button><label class="field"><span>Connect to another floor</span><select id="cross-floor-connect"><option value="">Choose equipment</option>${allAssets().filter(a => a.id !== asset.id && assetLocation(a.id)?.floor !== floor).map(a => `<option value="${esc(a.id)}">${esc(a.name)} · ${esc(locationName(a.id))}</option>`).join('')}</select></label>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
+    target.innerHTML = `<div class="inspector-eyebrow">SELECTED EQUIPMENT</div><div class="detail-hero"><span class="detail-icon">${icon(typeIcon(asset.type))}</span><div><h3>${esc(asset.name)}</h3><p>${esc(typeName(asset.type))}</p></div></div><div class="detail-badges"><span class="badge"><i></i>${asset.rackId ? 'In rack' : asset.placed ? 'Placed on plan' : 'Ready to place'}</span></div><div class="detail-divider"></div><div class="detail-heading"><strong>Equipment details</strong><span>EDITABLE</span></div><form id="asset-form"><label class="field"><span>Building / floor</span><select id="asset-floor">${allFloors().map(({building: b, floor: f}) => `<option value="${esc(f.id)}" ${f === floor ? 'selected' : ''}>${esc(b.name)} / ${esc(f.floorName)}</option>`).join('')}</select></label><label class="field"><span>Equipment name</span><input name="name" value="${esc(asset.name)}" required maxlength="80"></label><label class="field"><span>Equipment type</span><select name="type">${typeOptions(asset.type)}</select></label>${asset.type !== 'cabinet' ? `<label class="field"><span>Cabinet / rack</span><select name="rackId"><option value="">Unassigned</option>${project.assets.filter(a => a.type === 'cabinet').map(a => `<option value="${esc(a.id)}" ${asset.rackId === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>` : ''}${rackFields(asset)}<label class="field"><span>Vendor</span><input name="vendor" value="${esc(asset.vendor)}" maxlength="120"></label><label class="field"><span>Model / description</span><input name="model" value="${esc(asset.model)}" placeholder="e.g. 48-port switch" maxlength="120"></label><label class="field"><span>IP address</span><input name="ip" value="${esc(asset.ip)}" placeholder="e.g. 10.20.0.1" maxlength="80"></label>${engineeringFields(asset)}<label class="field"><span>Management URL</span><input name="managementUrl" type="url" value="${esc(asset.managementUrl)}" placeholder="https://" maxlength="500"></label>${portFields(asset)}</form><div class="detail-divider"></div><div class="detail-heading"><strong>Actions</strong><span>${project.cables.filter(c => c.from === asset.id || c.to === asset.id).length} CONNECTIONS</span></div><div class="detail-actions">${!asset.rackId ? `<button class="detail-button primary-action" data-action="place-asset">${icon('pin')} ${asset.placed ? 'Move on floor plan' : 'Place on floor plan'}</button>` : ''}${asset.type === 'cabinet' ? `<button class="detail-button" data-rack-open="${esc(asset.id)}">${icon('layers')} Open rack view</button>` : ''}<button class="detail-button" data-action="connect-asset">${icon('link')} Connect to equipment</button><label class="field"><span>Connect to a device</span><select id="cross-floor-connect"><option value="">Choose equipment</option>${allAssets().filter(a => a.id !== asset.id && a.type !== 'cabinet').map(a => `<option value="${esc(a.id)}">${esc(a.name)} · ${esc(locationName(a.id))}</option>`).join('')}</select></label>${url ? `<a class="detail-button" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${icon('external')} Open management interface</a>` : ''}<button class="detail-button danger" data-action="delete-asset">${icon('trash')} Remove equipment</button></div>`;
   } else if (cable) {
-    target.innerHTML = `<div class="inspector-eyebrow">SELECTED CABLE</div><h3>${esc(globalAsset(cable.from)?.name)} → ${esc(globalAsset(cable.to)?.name)}</h3><p class="detail-note">${esc(cable.fromPort || 'Interface unspecified')} → ${esc(cable.toPort || 'Interface unspecified')}</p><button class="detail-button" data-action="edit-connection-ports">Choose interfaces</button>${crossFloor(cable) ? `<p class="detail-note">${esc(locationName(cable.from))} → ${esc(locationName(cable.to))}</p><p class="detail-note">Cross-floor connection; physical route is not shown.</p>` : `<p class="detail-note">Click a segment to add a point. Drag points onto the grid, or focus a point and use arrow keys. Delete removes it.</p><div class="detail-actions"><button class="detail-button" data-action="add-point">Add point</button><button class="detail-button" data-action="remove-point" ${pointIndex === null ? 'disabled' : ''}>Remove selected point</button><button class="detail-button" data-action="reset-route">Reset automatic route</button></div>`}`;
+    target.innerHTML = `<div class="inspector-eyebrow">SELECTED CABLE</div><h3>${esc(globalAsset(cable.from)?.name)} → ${esc(globalAsset(cable.to)?.name)}</h3><p class="detail-note">${esc(cable.fromPort || 'Interface unspecified')} → ${esc(cable.toPort || 'Interface unspecified')}</p><button class="detail-button" data-action="edit-connection-ports">Choose interfaces</button>${physicalSummary(cable)}${crossFloor(cable) ? `<p class="detail-note">${esc(locationName(cable.from))} → ${esc(locationName(cable.to))}</p><p class="detail-note">Cross-floor connection; pathways are shown on their respective floors.</p>` : `<p class="detail-note">Click a segment to add a point. Drag points onto the grid, or focus a point and use arrow keys. Delete removes it.</p><div class="detail-actions"><button class="detail-button" data-action="add-point">Add point</button><button class="detail-button" data-action="remove-point" ${pointIndex === null ? 'disabled' : ''}>Remove selected point</button><button class="detail-button" data-action="reset-route">Reset automatic route</button></div>`}`;
   } else {
     target.innerHTML = `<div class="empty-inspector">${icon('layers')}<h3>Nothing selected</h3><p>Select equipment on the floor plan to see its details.</p></div>`;
   }
@@ -249,6 +257,21 @@ function renderScene() {
     for (const [x,y] of outlineDraft) { const [px,py] = point(x,y); out += `<circle cx="${round(px)}" cy="${round(py)}" r="5" fill="#277754" stroke="white" stroke-width="2" pointer-events="none"/>`; }
   }
   out += demoFurniture() + demoWalls();
+  const selectedRoute = selectedCable()?.route;
+  const selectedData = selectedCable() ? serializeProject(currentProject) : null;
+  const physicalState = selectedData ? routeStatus(selectedData, selectedData.connections.find(c => c.id === selectedCable().id)) : 'conceptual';
+  for (const path of currentProject.pathways.filter(item => item.floorId === floor.id)) {
+    const active = selectedRoute?.pathwayIds?.includes(path.id), color = active && physicalState === 'reviewed' ? '#248568' : '#547a9b';
+    out += `<polyline data-pathway="${esc(path.id)}" points="${points(path.points.map(p => [p.x, p.y]))}" fill="none" stroke="${color}" stroke-width="${active ? 4 : 2}" stroke-dasharray="${active && physicalState === 'reviewed' ? '' : '7 4'}" pointer-events="none"><title>${esc(path.name)} · ${active && physicalState === 'reviewed' ? 'manually reviewed route' : 'pathway, not verified'}</title></polyline>`;
+  }
+  for (const riser of currentProject.risers) for (const end of [riser.from, riser.to]) if (end.floorId === floor.id) {
+    const [x, y] = point(end.x, end.y);
+    out += `<g data-riser="${esc(riser.id)}" pointer-events="none"><circle cx="${round(x)}" cy="${round(y)}" r="6" fill="#fff" stroke="#547a9b" stroke-width="2"/><title>${esc(riser.name)} · riser endpoint</title></g>`;
+  }
+  if (mode === 'pathway') {
+    if (pathwayDraft.length) out += `<polyline points="${points(pathwayDraft.map(p => [p.x, p.y]))}" fill="none" stroke="#365f85" stroke-width="3" stroke-dasharray="6 4" pointer-events="none"/>`;
+    for (const anchor of physicalAnchors()) { const [x, y] = point(anchor.x, anchor.y); out += `<circle cx="${round(x)}" cy="${round(y)}" r="4" fill="#fff" stroke="#365f85" stroke-width="1.5" pointer-events="none"/>`; }
+  }
   const editing = selectedCable() && !crossFloor(selectedCable()) ? selectedCable() : null;
   if (editing) {
     out += '<g class="route-editor" pointer-events="none">';
@@ -263,7 +286,7 @@ function renderScene() {
     if (!a?.placed || !b?.placed || a.id === b.id) continue;
     const fixed = [a, ...(cable.waypoints || []), b];
     const path = points(cableRoute(a, cable.waypoints || [], b));
-    out += `<polyline data-cable="${esc(cable.id)}" tabindex="0" role="button" aria-label="Cable ${esc(a.name)} to ${esc(b.name)}" points="${path}" fill="none" stroke="${cable === editing ? '#b3742f' : esc(cable.color || '#d9a667')}" stroke-width="${cable === editing ? 3 : 2.1}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    out += `<polyline data-cable="${esc(cable.id)}" tabindex="0" role="button" aria-label="Conceptual connection ${esc(a.name)} to ${esc(b.name)}" points="${path}" fill="none" stroke="${cable === editing ? '#b3742f' : esc(cable.color || '#d9a667')}" stroke-width="${cable === editing ? 3 : 2.1}" stroke-dasharray="5 4" stroke-linejoin="round" stroke-linecap="round"/>`;
     fixed.slice(1).forEach((next, i) => {
       const segment = points(cableRoute(fixed[i], [], next));
       out += `<polyline class="route-hit" data-cable-hit="${esc(cable.id)}" data-segment="${i}" points="${segment}" fill="none" stroke="transparent" stroke-width="16"/>`;
@@ -283,6 +306,104 @@ function renderScene() {
 }
 
 function closeDialogs() { pendingPort = null; document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
+let questionResolve = null, questionKind = '';
+function question(title, message = '', initial = '', kind = 'text') {
+  closeDialogs(); questionKind = kind;
+  $('#question-title').textContent = title; $('#question-message').textContent = message;
+  $('#question-label').textContent = title; $('#question-field').hidden = kind !== 'text';
+  $('#question-input').value = initial; $('#question-input').required = kind === 'text';
+  $('#question-error').textContent = ''; $('#question-cancel').hidden = kind === 'notice';
+  $('#question-submit').textContent = kind === 'text' ? 'Save' : kind === 'confirm' ? 'Remove' : 'OK';
+  $('#question-dialog').showModal();
+  if (kind === 'text') { $('#question-input').focus(); $('#question-input').select(); }
+  return new Promise(resolve => { questionResolve = resolve; });
+}
+$('#question-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const value = $('#question-input').value.trim();
+  if (questionKind === 'text' && (!value || value.length > 80)) { $('#question-error').textContent = 'Enter a name of up to 80 characters.'; $('#question-input').focus(); return; }
+  const resolve = questionResolve; questionResolve = null; $('#question-dialog').close(); resolve?.(questionKind === 'text' ? value : true);
+});
+$('#question-cancel').addEventListener('click', () => $('#question-dialog').close());
+$('#question-dialog').addEventListener('close', () => { const resolve = questionResolve; questionResolve = null; resolve?.(null); });
+function floorLabel(id) { const at = allFloors().find(({ floor }) => floor.id === id); return at ? `${at.building.name} / ${at.floor.floorName}` : 'Unknown floor'; }
+function showPhysical() {
+  const paths = currentProject.pathways.map(path => `<div class="inventory-row"><div><strong>${esc(path.name)}</strong><small>Pathway · ${esc(floorLabel(path.floorId))}</small></div><button class="text-button" data-redraw-pathway="${esc(path.id)}">Redraw</button><button class="text-button" data-delete-pathway="${esc(path.id)}">Remove</button></div>`).join('');
+  const risers = currentProject.risers.map(riser => `<div class="inventory-row"><div><strong>${esc(riser.name)}</strong><small>Riser · ${esc(floorLabel(riser.from.floorId))} → ${esc(floorLabel(riser.to.floorId))}</small></div><button class="text-button" data-edit-riser="${esc(riser.id)}">Edit</button><button class="text-button" data-delete-riser="${esc(riser.id)}">Remove</button></div>`).join('');
+  $('#physical-list').innerHTML = paths + risers || '<p class="detail-note">No pathways or risers yet.</p>';
+  closeDialogs(); $('#physical-dialog').showModal();
+}
+function startPathway(path = null) {
+  if (path && path.floorId !== floor.id) {
+    const at = allFloors().find(item => item.floor.id === path.floorId);
+    if (!at) return;
+    workspace.buildingIndex = currentProject.buildings.indexOf(at.building); workspace.floorIndex = at.building.floors.indexOf(at.floor); selectFloor(); resetSelection();
+  }
+  editingPathway = path?.id || ''; pathwayDraft = []; closeDialogs();
+  setMode('pathway', 'Click pathway points; endpoints snap to nearby equipment, risers and pathways.'); render();
+}
+function openFloorSettings() {
+  const form = $('#floor-settings-form');
+  form.elements.widthMeters.value = floor.scale?.widthMeters ?? '';
+  form.elements.heightMeters.value = floor.scale?.heightMeters ?? '';
+  form.elements.northDegrees.value = floor.northDegrees ?? '';
+  $('#floor-settings-error').textContent = ''; closeDialogs(); $('#floor-settings-dialog').showModal();
+}
+$('#floor-settings-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.target;
+  const width = form.elements.widthMeters.value, height = form.elements.heightMeters.value, north = form.elements.northDegrees.value;
+  if ((!!width !== !!height) || (width && (!Number.isFinite(Number(width)) || Number(width) <= 0 || !Number.isFinite(Number(height)) || Number(height) <= 0)) || (north !== '' && (!Number.isFinite(Number(north)) || Number(north) < 0 || Number(north) >= 360))) { $('#floor-settings-error').textContent = 'Enter both positive dimensions or leave both blank; north must be from 0 to less than 360 degrees.'; return; }
+  floor.scale = width ? { widthMeters: Number(width), heightMeters: Number(height) } : null;
+  floor.northDegrees = north === '' ? null : Number(north); closeDialogs(); save(); render();
+});
+let editingRiser = '';
+function openRiser(riser = null) {
+  editingRiser = riser?.id || ''; const form = $('#riser-form');
+  const options = allFloors().map(({ building, floor }) => `<option value="${esc(floor.id)}">${esc(building.name)} / ${esc(floor.floorName)}</option>`).join('');
+  form.elements.fromFloor.innerHTML = options; form.elements.toFloor.innerHTML = options;
+  form.elements.namedItem('name').value = riser?.name || '';
+  form.elements.fromFloor.value = riser?.from.floorId || floor.id;
+  form.elements.toFloor.value = riser?.to.floorId || allFloors().find(item => item.floor.id !== floor.id)?.floor.id || floor.id;
+  for (const [field, value] of [['fromX', riser?.from.x], ['fromY', riser?.from.y], ['toX', riser?.to.x], ['toY', riser?.to.y], ['lengthMeters', riser?.lengthMeters]]) form.elements[field].value = value ?? '';
+  $('#riser-error').textContent = ''; closeDialogs(); $('#riser-dialog').showModal();
+}
+$('#riser-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.target, name = form.elements.namedItem('name').value.trim();
+  const coords = ['fromX', 'fromY', 'toX', 'toY'].map(key => form.elements[key].value === '' ? NaN : Number(form.elements[key].value));
+  const length = form.elements.lengthMeters.value === '' ? null : Number(form.elements.lengthMeters.value);
+  if (!name || name.length > 80 || form.elements.fromFloor.value === form.elements.toFloor.value || coords.some(n => !Number.isFinite(n) || n < 0 || n > 100) || (length !== null && (!Number.isFinite(length) || length < 0))) { $('#riser-error').textContent = 'Enter a name, two different floors, valid endpoint coordinates and a non-negative length if known.'; return; }
+  const value = { id: editingRiser || uid(), name, from: { floorId: form.elements.fromFloor.value, x: coords[0], y: coords[1] }, to: { floorId: form.elements.toFloor.value, x: coords[2], y: coords[3] }, lengthMeters: length };
+  const index = currentProject.risers.findIndex(r => r.id === editingRiser);
+  if (index < 0) currentProject.risers.push(value); else currentProject.risers[index] = value;
+  closeDialogs(); save(); render(); showPhysical();
+});
+let routeCable = '';
+function openPhysicalRoute(cable) {
+  routeCable = cable.id; const route = cable.route || { pathwayIds: [], riserIds: [], extraMeters: null, review: null }, form = $('#physical-route-form');
+  $('#route-pathways').innerHTML = currentProject.pathways.map(path => `<label class="route-choice"><input type="checkbox" name="pathway" value="${esc(path.id)}" ${route.pathwayIds.includes(path.id) ? 'checked' : ''}> ${esc(path.name)} · ${esc(floorLabel(path.floorId))}</label>`).join('') || '<p class="detail-note">No pathways have been drawn.</p>';
+  $('#route-risers').innerHTML = currentProject.risers.map(riser => `<label class="route-choice"><input type="checkbox" name="riser" value="${esc(riser.id)}" ${route.riserIds.includes(riser.id) ? 'checked' : ''}> ${esc(riser.name)} · ${esc(floorLabel(riser.from.floorId))} → ${esc(floorLabel(riser.to.floorId))}</label>`).join('') || '<p class="detail-note">No risers have been defined.</p>';
+  form.elements.extraMeters.value = route.extraMeters ?? ''; form.elements.reviewNote.value = route.review?.note || '';
+  $('#physical-route-error').textContent = ''; closeDialogs(); $('#physical-route-dialog').showModal();
+}
+$('#physical-route-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.target, cable = project.cables.find(item => item.id === routeCable); if (!cable) return;
+  const text = form.elements.extraMeters.value, extraMeters = text === '' ? null : Number(text);
+  if (extraMeters !== null && (!Number.isFinite(extraMeters) || extraMeters < 0)) { $('#physical-route-error').textContent = 'Enter a non-negative allowance or leave it unknown.'; return; }
+  const route = { pathwayIds: [...form.querySelectorAll('input[name="pathway"]:checked')].map(input => input.value), riserIds: [...form.querySelectorAll('input[name="riser"]:checked')].map(input => input.value), extraMeters, review: cable.route?.review || null };
+  if (event.submitter?.value === 'review') {
+    try {
+      const data = serializeProject(currentProject), draft = data.connections.find(item => item.id === cable.id); draft.route = route;
+      reviewRoute(data, draft, form.elements.reviewNote.value); route.review = draft.route.review;
+    } catch (error) { $('#physical-route-error').textContent = error.message; return; }
+  }
+  cable.route = route; closeDialogs(); save(); render();
+});
+function physicalSummary(cable) {
+  const data = serializeProject(currentProject), connection = data.connections.find(item => item.id === cable.id), status = routeStatus(data, connection), estimate = estimateRoute(data, connection);
+  const label = status === 'reviewed' ? `Manually reviewed: ${connection.route.review.note}. Titan has not verified installation feasibility.` : status === 'documented' ? `Documented physical route — unverified.${connection.route.review ? ' Previous review is out of date.' : ''}` : 'Conceptual connection — no physical route documented.';
+  const length = estimate.meters === null ? `Length unknown. ${status === 'conceptual' ? '' : estimate.issues.join(' ')}` : `Estimated cable length: ${Number(estimate.meters.toFixed(2))} m, including the entered allowance.`;
+  return `<p class="detail-note">${esc(label)}</p><p class="detail-note">${esc(length)}</p><button class="detail-button" data-action="edit-physical-route">Edit physical route</button>`;
+}
 let validationFindings = [];
 function validationTargetLabel(ref) {
   if (ref.kind === 'device' || ref.kind === 'rack') return globalAsset(ref.id)?.name || '';
@@ -317,15 +438,15 @@ let connectionDraft = null;
 function portAvailable(device, port, except = null) {
   return !project.cables.some(c => c !== except && ((c.from === device.id && (c.fromPortId === port.id || c.fromPort?.toLowerCase() === port.name.toLowerCase())) || (c.to === device.id && (c.toPortId === port.id || c.toPort?.toLowerCase() === port.name.toLowerCase()))));
 }
-function openConnection(from, to, cable = null) {
+function openConnection(from, to, cable = null, preset = {}) {
   if (!from || !to || from.id === to.id || from.type === 'cabinet' || to.type === 'cabinet') { toast('Choose two different devices.'); return; }
   const sources = from.ports.filter(p => portAvailable(from, p, cable)), destinations = to.ports.filter(p => portAvailable(to, p, cable));
   if (!sources.length || !destinations.length) { toast('Both devices need a free interface. Configure ports in equipment details.'); return; }
-  connectionDraft = { from: from.id, to: to.id, cable };
+  connectionDraft = { from: from.id, to: to.id, cable, ...preset };
   $('#connect-from-label').textContent = `${from.name} interface`;
   $('#connect-to-label').textContent = `${to.name} interface`;
-  $('#connect-from').innerHTML = '<option value="">Choose interface</option>' + sources.map(p => `<option value="${esc(p.id)}" ${cable && (cable.fromPortId === p.id || cable.fromPort === p.name) ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
-  $('#connect-destination').innerHTML = '<option value="">Choose interface</option>' + destinations.map(p => `<option value="${esc(p.id)}" ${cable && (cable.toPortId === p.id || cable.toPort === p.name) ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  $('#connect-from').innerHTML = '<option value="">Choose interface</option>' + sources.map(p => `<option value="${esc(p.id)}" ${(preset.fromPortId === p.id || cable && (cable.fromPortId === p.id || cable.fromPort === p.name)) ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  $('#connect-destination').innerHTML = '<option value="">Choose interface</option>' + destinations.map(p => `<option value="${esc(p.id)}" ${(preset.toPortId === p.id || cable && (cable.toPortId === p.id || cable.toPort === p.name)) ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
   closeDialogs(); $('#connect-dialog').showModal();
 }
 $('#connect-form').addEventListener('submit', event => {
@@ -335,8 +456,9 @@ $('#connect-form').addEventListener('submit', event => {
   if (!a || !b || !portAvailable(from, a, draft.cable) || !portAvailable(to, b, draft.cable)) { toast('Choose free interfaces on both devices.'); return; }
   const cable = draft.cable || { id: uid(), from: from.id, to: to.id, waypoints: [] };
   Object.assign(cable, { fromPort: a.name, fromPortId: a.id, toPort: b.name, toPortId: b.id });
+  if (!draft.cable && draft.color) cable.color = draft.color;
   if (!draft.cable) project.cables.push(cable);
-  connectionDraft = null; closeDialogs(); setMode('select'); save(); render(); toast('Connection updated.');
+  connectionDraft = null; closeDialogs(); setMode('select'); save(); render(); if (draft.returnRack) showRacks(draft.returnRack, to.id, b.name); toast('Connection updated.');
 });
 function showConnections() {
   $('#connection-list').innerHTML = project.cables.map(cable => `<div class="inventory-row"><span class="inventory-asset-icon">${icon('link')}</span><div><button class="cable-select" data-cable-select="${esc(cable.id)}"><strong>${esc(globalAsset(cable.from)?.name || 'Unknown')} → ${esc(globalAsset(cable.to)?.name || 'Unknown')}</strong><small>${esc(cable.fromPort || "Interface unspecified")} · ${esc(locationName(cable.from))} → ${esc(cable.toPort || "Interface unspecified")} · ${esc(locationName(cable.to))}</small></button></div><button class="tool-button" data-remove-cable="${esc(cable.id)}" title="Remove cable" aria-label="Remove cable">${icon('trash')}</button></div>`).join('') || '<p class="detail-note">There are no cables in this project yet.</p>';
@@ -426,6 +548,24 @@ function worldAt(event) {
   const [x, y] = worldFromEvent(event);
   return x >= 0 && x <= 100 && y >= 0 && y <= 100 ? [round(x), round(y)] : null;
 }
+function physicalAnchors() {
+  return [
+    ...project.assets.filter(asset => asset.placed && !asset.rackId).map(({ x, y }) => ({ x, y })),
+    ...currentProject.risers.flatMap(riser => [riser.from, riser.to].filter(end => end.floorId === floor.id).map(({ x, y }) => ({ x, y }))),
+    ...currentProject.pathways.filter(path => path.floorId === floor.id).flatMap(path => [path.points[0], path.points.at(-1)])
+  ];
+}
+function addPathwayPoint(x, y, snapToAnchor = false) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) { toast('Enter coordinates from 0 to 100.'); return; }
+  if (pathwayDraft.length >= 200) { toast('A pathway can have up to 200 points.'); return; }
+  if (snapToAnchor) {
+    const anchor = physicalAnchors().map(point => ({ point, distance: Math.hypot(point.x - x, point.y - y) })).sort((a, b) => a.distance - b.distance)[0];
+    if (anchor?.distance <= 2) ({ x, y } = anchor.point);
+  }
+  const last = pathwayDraft.at(-1);
+  if (last?.x === x && last?.y === y) { toast('Choose a different point.'); return; }
+  pathwayDraft.push({ x, y }); renderScene();
+}
 function handleSceneClick(event) {
   if (ignoreSceneClick) { ignoreSceneClick = false; return; }
   const assetNode = event.target.closest('[data-asset]');
@@ -435,6 +575,7 @@ function handleSceneClick(event) {
     inspectorOpen = true; setMode('select'); render(); openConnection(from, to); return;
   }
   if (mode === 'double-connect') return;
+  if (mode === 'pathway') { const item = assetNode && assetById(assetNode.dataset.asset); const location = item?.placed && !item.rackId ? [item.x, item.y] : worldAt(event); if (location) addPathwayPoint(...location, true); else toast('Choose a point within the plan area.'); return; }
   if (mode === 'outline') {
     const location = worldAt(event);
     if (!location) { toast('Choose a point within the plan area.'); return; }
@@ -501,6 +642,8 @@ $('#scene').addEventListener('pointerdown', event => {
   }
 });
 $('#scene').addEventListener('pointermove', event => {
+  const coordinate = worldAt(event);
+  $('#coordinate-readout').textContent = coordinate ? `X ${coordinate[0]}% · Y ${coordinate[1]}%` : '';
   if (!pointers.has(event.pointerId)) return;
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (drag?.kind === 'pinch' && pointers.size >= 2) {
@@ -524,6 +667,7 @@ $('#scene').addEventListener('pointermove', event => {
   if (drag.kind === 'pan') { const p = svgPosition(event.clientX,event.clientY); pan.x += drag.start.x-p.x; pan.y += drag.start.y-p.y; }
   renderScene();
 });
+$('#scene').addEventListener('pointerleave', () => { $('#coordinate-readout').textContent = ''; });
 $('#scene').addEventListener('pointerup', event => {
   pointers.delete(event.pointerId);
   if (drag?.kind === 'pinch') { drag = null; ignoreSceneClick = true; setTimeout(() => { ignoreSceneClick = false; }, 0); return; }
@@ -564,8 +708,7 @@ function connectRackPort(device, port) {
   const source = pendingPort && assetById(pendingPort.device), target = globalAsset(device);
   const free = (id, name) => !project.cables.some(c => (c.from === id && c.fromPort?.toLowerCase() === name.toLowerCase()) || (c.to === id && c.toPort?.toLowerCase() === name.toLowerCase()));
   if (!source || !target || source.id === target.id || !source.ports.some(p => p.name === pendingPort.port) || !target.ports.some(p => p.name === port) || !free(source.id, pendingPort.port) || !free(device, port)) { toast('Choose a free port on a different device.'); return; }
-  project.cables.push({ id: uid(), from: source.id, fromPort: pendingPort.port, fromPortId: source.ports.find(p => p.name === pendingPort.port).id, to: device, toPort: port, toPortId: target.ports.find(p => p.name === port).id, waypoints: [], label: '', color: pendingPort.color || '#d9a667' });
-  pendingPort = null; save(); render(); showRacks(rackView, device, port); toast('Ports connected.');
+  openConnection(source, target, null, { fromPortId: source.ports.find(p => p.name === pendingPort.port).id, toPortId: target.ports.find(p => p.name === port).id, color: pendingPort.color || '#d9a667', returnRack: rackView });
 }
 function selectRackPort(button) {
   const device = button.dataset.portDevice, port = button.dataset.portName;
@@ -584,7 +727,29 @@ document.addEventListener('dblclick', event => {
   if (port) { event.preventDefault(); selectRackPort(port); }
 });
 
-document.addEventListener('click', event => {
+document.addEventListener('click', async event => {
+  const redrawPath = event.target.closest('[data-redraw-pathway]');
+  if (redrawPath) { const path = currentProject.pathways.find(item => item.id === redrawPath.dataset.redrawPathway); if (path) startPathway(path); return; }
+  const deletePath = event.target.closest('[data-delete-pathway]');
+  if (deletePath) {
+    const path = currentProject.pathways.find(item => item.id === deletePath.dataset.deletePathway);
+    if (!path) return;
+    if (project.cables.some(c => c.route?.pathwayIds.includes(path.id))) { toast('Remove this pathway from connections before deleting it.'); return; }
+    if (await question('Remove pathway?', `Remove ${path.name}?`, '', 'confirm')) { currentProject.pathways = currentProject.pathways.filter(item => item.id !== path.id); save(); render(); showPhysical(); }
+    else showPhysical();
+    return;
+  }
+  const editRiser = event.target.closest('[data-edit-riser]');
+  if (editRiser) { const riser = currentProject.risers.find(item => item.id === editRiser.dataset.editRiser); if (riser) openRiser(riser); return; }
+  const deleteRiser = event.target.closest('[data-delete-riser]');
+  if (deleteRiser) {
+    const riser = currentProject.risers.find(item => item.id === deleteRiser.dataset.deleteRiser);
+    if (!riser) return;
+    if (project.cables.some(c => c.route?.riserIds.includes(riser.id))) { toast('Remove this riser from connections before deleting it.'); return; }
+    if (await question('Remove riser?', `Remove ${riser.name}?`, '', 'confirm')) { currentProject.risers = currentProject.risers.filter(item => item.id !== riser.id); save(); render(); showPhysical(); }
+    else showPhysical();
+    return;
+  }
   const validationLink = event.target.closest('[data-validation-target]');
   if (validationLink) { const [i, j] = validationLink.dataset.validationTarget.split(':').map(Number); const ref = validationFindings[i]?.targets[j]; if (ref) openValidationTarget(ref); return; }
   const rackButton = event.target.closest('[data-rack-open]');
@@ -612,6 +777,11 @@ document.addEventListener('click', event => {
     case 'cancel-port': pendingPort = null; showRacks(rackView, rackDevice); break;
     case 'show-racks': showRacks(); break;
     case 'show-connections': showConnections(); break;
+    case 'physical-assets': showPhysical(); break;
+    case 'floor-settings': openFloorSettings(); break;
+    case 'draw-pathway': startPathway(); break;
+    case 'add-riser': openRiser(); break;
+    case 'edit-physical-route': { const cable = selectedCable(); if (cable) openPhysicalRoute(cable); break; }
     case 'show-validation': showValidation(); break;
     case 'edit-connection-ports': { const cable = selectedCable(); if (cable) openConnection(globalAsset(cable.from), globalAsset(cable.to), cable); break; }
     case 'close-dialog': closeDialogs(); break;
@@ -623,21 +793,32 @@ document.addEventListener('click', event => {
     case 'undo-outline': outlineDraft.pop(); renderScene(); break;
     case 'finish-outline':
       if (outlineDraft.length < 3) { toast('Choose at least three points for the outline.'); break; }
-      project.outline = outlineDraft.map(p => [...p]); outlineDraft = []; setMode('select'); save(); render(); toast('Floor outline updated.'); break;
-    case 'clear-outline': project.outline = []; save(); render(); toast('Floor outline reset.'); break;
+      project.outline = outlineDraft.map(p => [...p]); reviseFloor(project); outlineDraft = []; setMode('select'); save(); render(); toast('Floor outline updated.'); break;
+    case 'clear-outline': project.outline = []; reviseFloor(project); save(); render(); toast('Floor outline reset.'); break;
+    case 'undo-pathway': pathwayDraft.pop(); renderScene(); break;
+    case 'add-pathway-point': { const x = $('#pathway-x').value, y = $('#pathway-y').value; addPathwayPoint(x === '' ? NaN : Number(x), y === '' ? NaN : Number(y)); break; }
+    case 'finish-pathway': {
+      if (pathwayDraft.length < 2) { toast('Choose at least two pathway points.'); break; }
+      const existing = currentProject.pathways.find(item => item.id === editingPathway);
+      const name = existing?.name || await question('Pathway name', '', 'New pathway');
+      if (!name) break;
+      const path = { id: existing?.id || uid(), name, floorId: floor.id, points: pathwayDraft.map(p => ({ ...p })) };
+      if (existing) currentProject.pathways[currentProject.pathways.indexOf(existing)] = path; else currentProject.pathways.push(path);
+      pathwayDraft = []; editingPathway = ''; setMode('select'); save(); render(); toast('Pathway saved.'); break;
+    }
     case 'import-project': $('#project-file').click(); break;
-    case 'cancel-mode': outlineDraft = []; inspectorOpen = !!selected.id; setMode('select'); render(); break;
+    case 'cancel-mode': outlineDraft = []; pathwayDraft = []; editingPathway = ''; inspectorOpen = !!selected.id; setMode('select'); render(); break;
     case 'add-asset': {
       const added = { id: uid(), name: 'New equipment', type: 'switch', zoneId: '', vendor: '', model: '', ip: '', managementUrl: '', placed: false, rackId: '', rackStart: null, rackHeight: null, rackUnits: null, ports: [] };
       project.assets.push(added); selected = { kind: 'asset', id: added.id }; inspectorOpen = true; closeDialogs(); save(); setMode('select'); render(); toast('Equipment added. Edit its details and place it on the plan.'); break;
     }
     case 'place-asset': if (asset) { inspectorOpen = false; renderInspector(); setMode('place', `Choose a position for ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); } break;
     case 'connect-asset':
-      if (!asset?.placed) toast('Place this equipment on the plan first.');
+      if (!asset || asset.type === 'cabinet') toast('Choose a device to connect.');
       else { inspectorOpen = false; renderInspector(); setMode('connect', `Select equipment to connect to ${asset.name}`); $('#canvas-card').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
       break;
     case 'delete-asset':
-      if (asset && confirm(`Remove ${asset.name} and its connections?`)) { project.assets = project.assets.filter(a => a.id !== asset.id); project.cables = project.cables.filter(c => c.from !== asset.id && c.to !== asset.id); project.assets.forEach(a => { if (a.rackId === asset.id) Object.assign(a, { rackId: '', rackStart: null, rackHeight: null }); }); selected = { kind: null, id: null }; save(); setMode('select'); render(); toast('Equipment removed.'); }
+      if (asset && await question('Remove equipment?', `Remove ${asset.name} and its connections?`, '', 'confirm')) { project.assets = project.assets.filter(a => a.id !== asset.id); project.cables = project.cables.filter(c => c.from !== asset.id && c.to !== asset.id); project.assets.forEach(a => { if (a.rackId === asset.id) Object.assign(a, { rackId: '', rackStart: null, rackHeight: null }); }); selected = { kind: null, id: null }; save(); setMode('select'); render(); toast('Equipment removed.'); }
       break;
     case 'auto-place': {
       const before = project.assets.filter(a => a.placed).length;
@@ -658,26 +839,26 @@ document.addEventListener('click', event => {
       download(`${projectFilename()}-floor-plan.svg`, new XMLSerializer().serializeToString(copy), 'image/svg+xml'); toast('Diagram exported as SVG.'); break;
     }
     case 'rename-project': {
-      const name = prompt('Project name', project.name)?.trim();
+      const name = await question('Project name', '', project.name);
       if (name) { project.name = name.slice(0, 80); save(); render(); }
       break;
     }
     case 'new-project': {
-      const name = prompt('Project name', 'Untitled project')?.trim(); if (!name) break;
-      workspace.projects.push({ schemaVersion: 1, name: name.slice(0, 80), buildings: [{ id: uid(), name: 'Building 1', floors: [blankFloor()] }], cables: [] });
+      const name = await question('Project name', '', 'Untitled project'); if (!name) break;
+      workspace.projects.push({ schemaVersion: 1, name: name.slice(0, 80), buildings: [{ id: uid(), name: 'Building 1', floors: [blankFloor()] }], cables: [], pathways: [], risers: [] });
       workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); break;
     }
     case 'new-building': {
-      const name = prompt('Building name', 'New building')?.trim(); if (!name) break;
+      const name = await question('Building name', '', 'New building'); if (!name) break;
       currentProject.buildings.push({ id: uid(), name: name.slice(0, 80), floors: [blankFloor()] });
       workspace.buildingIndex = currentProject.buildings.length - 1; workspace.floorIndex = 0; selectFloor(); resetSelection(); save(); render(); break;
     }
     case 'new-floor': {
-      const name = prompt('Floor name', 'New floor')?.trim(); if (!name) break;
+      const name = await question('Floor name', '', 'New floor'); if (!name) break;
       building.floors.push({ ...blankFloor(name.slice(0, 80)), outline: (floor.outline || []).map(p => [...p]) }); workspace.floorIndex = building.floors.length - 1; selectFloor(); resetSelection(); save(); render(); break;
     }
-    case 'rename-building': { const name = prompt('Building name', building.name)?.trim(); if (name) { building.name = name.slice(0, 80); save(); render(); } break; }
-    case 'rename-floor': { const name = prompt('Floor name', floor.floorName)?.trim(); if (name) { floor.floorName = name.slice(0, 80); save(); render(); } break; }
+    case 'rename-building': { const name = await question('Building name', '', building.name); if (name) { building.name = name.slice(0, 80); save(); render(); } break; }
+    case 'rename-floor': { const name = await question('Floor name', '', floor.floorName); if (name) { floor.floorName = name.slice(0, 80); save(); render(); } break; }
 
   }
 });
@@ -762,8 +943,8 @@ $('#inventory-file').addEventListener('change', async event => {
     result.assets.filter(a => ['switch', 'firewall', 'router'].includes(a.type)).forEach(a => { a.rackId = ''; });
     project.assets.push(...result.assets); render();
     if (await save()) toast(`Imported ${result.assets.length} equipment item${result.assets.length === 1 ? '' : 's'}.`);
-    if (result.errors.length) alert(`Inventory notes:\n\n${result.errors.slice(0, 30).join('\n')}${result.errors.length > 30 ? `\n…and ${result.errors.length - 30} more.` : ''}`);
-  } catch (error) { alert(error.message); }
+    if (result.errors.length) await question('Inventory notes', `${result.errors.slice(0, 30).join('\n')}${result.errors.length > 30 ? `\n…and ${result.errors.length - 30} more.` : ''}`, '', 'notice');
+  } catch (error) { await question('Could not import inventory', error.message, '', 'notice'); }
   event.target.value = '';
 });
 $('#plan-file').addEventListener('change', async event => {
@@ -773,8 +954,8 @@ $('#plan-file').addEventListener('change', async event => {
     if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Choose a PNG, JPEG, or WebP floor plan.');
     if (file.size > 2_000_000) throw new Error('Floor plan must be smaller than 2 MB for browser storage.');
     const image = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read the floor plan.')); reader.readAsDataURL(file); });
-    targetFloor.planImage = image; targetFloor.demo = false; render(); if (await save()) toast('Floor plan uploaded.');
-  } catch (error) { alert(error.message); }
+    targetFloor.planImage = image; targetFloor.demo = false; reviseFloor(targetFloor); render(); if (await save()) toast('Floor plan uploaded.');
+  } catch (error) { await question('Could not upload floor plan', error.message, '', 'notice'); }
   event.target.value = '';
 });
 $('#project-file').addEventListener('change', async event => {
@@ -784,13 +965,13 @@ $('#project-file').addEventListener('change', async event => {
     const imported = restoreHierarchy(JSON.parse(await file.text()));
     workspace.projects.push(imported); workspace.projectIndex = workspace.projects.length - 1; workspace.buildingIndex = 0; workspace.floorIndex = 0; selectFloor(); resetSelection(); render();
     if (await save()) toast('Project imported.');
-  } catch (error) { alert(`Could not import project: ${error.message}`); }
+  } catch (error) { await question('Could not import project', error.message, '', 'notice'); }
   event.target.value = '';
 });
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
   if (drag) { cancelDrag(); pointers.clear(); return; }
-  if (mode !== 'select') { outlineDraft = []; inspectorOpen = !!selected.id; setMode('select'); render(); }
+  if (mode !== 'select') { outlineDraft = []; pathwayDraft = []; editingPathway = ''; inspectorOpen = !!selected.id; setMode('select'); render(); }
   else if (!$('.inspector').hidden) { selected = { kind: null, id: null }; inspectorOpen = false; render(); }
 });
 render();

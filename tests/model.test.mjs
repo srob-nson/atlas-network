@@ -185,7 +185,7 @@ test('legacy projects migrate to a versioned schema and future versions are reje
   const migrated = restoreHierarchy(legacy);
   assert.equal(migrated.schemaVersion, 1);
   assert.deepEqual(restoreHierarchy(JSON.parse(JSON.stringify(migrated))), migrated);
-  assert.throws(() => restoreHierarchy({ ...migrated, schemaVersion: 4 }), /version/i);
+  assert.throws(() => restoreHierarchy({ ...migrated, schemaVersion: 5 }), /version/i);
 });
 
 test('inventory schema rejects ambiguous headers and oversized fields', () => {

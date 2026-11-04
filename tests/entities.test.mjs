@@ -37,7 +37,7 @@ test('legacy connections retain unresolved endpoints and versioned entities roun
   ], cables: [{ id: 'c1', from: 'a', fromPort: 'Gi1', to: 'b', toPort: 'WAN' }, { id: 'c2', from: 'a', to: 'b' }] };
   const project = restoreHierarchy(legacy);
   const data = serializeProject(project);
-  assert.equal(data.schemaVersion, 3);
+  assert.equal(data.schemaVersion, 4);
   assert.equal(data.devices.length, 2);
   assert.equal(data.ports.length, 2);
   assert.ok(data.connections[0].from.portId);

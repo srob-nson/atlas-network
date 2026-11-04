@@ -38,7 +38,7 @@ try {
   let floors = await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors`);
   assert.equal(floors[0].outline.length, 6);
   assert.equal(await evaluate(`document.querySelector('[data-floor]').getAttribute('points').split(' ').length`), 6);
-  await evaluate(`window.prompt = () => 'Upper'; document.querySelector('[data-action="new-floor"]').click()`);
+  await evaluate(`document.querySelector('[data-action="new-floor"]').click(); document.querySelector('#question-input').value='Upper'; document.querySelector('#question-form').requestSubmit()`);
   floors = await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].buildings[0].floors`);
   assert.deepEqual(floors[1].outline, floors[0].outline);
   assert.equal(floors[1].planImage, '');

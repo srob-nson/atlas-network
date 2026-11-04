@@ -13,7 +13,7 @@ await new Promise(r => setTimeout(r, 600));
 await evaluate(`localStorage.clear(); localStorage.setItem('titan-project-v1', JSON.stringify({name:'Legacy',floorName:'Ground',zones:[],assets:[{id:'a',name:'A',type:'access_point',placed:true,x:50,y:50,ports:[{name:'1',speed:'Unknown'}]}],cables:[]})); location.reload()`);
 await new Promise(r => setTimeout(r, 600));
 assert.equal(await evaluate(`document.querySelector('#breadcrumb-project').textContent`), 'Legacy');
-await evaluate(`window.prompt = () => 'Upper'; document.querySelector('[data-action="new-floor"]').click()`);
+await evaluate(`document.querySelector('[data-action="new-floor"]').click(); document.querySelector('#question-input').value='Upper'; document.querySelector('#question-form').requestSubmit()`);
 assert.equal(await evaluate(`document.querySelector('#floor-select').options.length`), 2);
 await evaluate(`document.querySelector('[data-action="add-asset"]').click()`);
 await evaluate(`{const e=document.querySelector('[name="portCount"]');e.value='1';e.dispatchEvent(new Event('change',{bubbles:true}));}`);
@@ -26,9 +26,9 @@ assert.equal(await evaluate(`document.querySelectorAll('[data-cable]').length`),
 await evaluate(`location.reload()`); await new Promise(r => setTimeout(r,600));
 assert.equal(await evaluate(`document.querySelector('#floor-select').options.length`), 2);
 assert.equal(await evaluate(`document.querySelectorAll('[data-cable]').length`), 1);
-await evaluate(`window.prompt = () => 'Annex'; document.querySelector('[data-action="new-building"]').click()`);
+await evaluate(`document.querySelector('[data-action="new-building"]').click(); document.querySelector('#question-input').value='Annex'; document.querySelector('#question-form').requestSubmit()`);
 assert.equal(await evaluate(`document.querySelector('#building-select').options.length`), 2);
-await evaluate(`window.prompt = () => 'Second project'; document.querySelector('[data-action="new-project"]').click()`);
+await evaluate(`document.querySelector('[data-action="new-project"]').click(); document.querySelector('#question-input').value='Second project'; document.querySelector('#question-form').requestSubmit()`);
 assert.equal(await evaluate(`document.querySelector('#project-select').options.length`), 2);
 await evaluate(`document.querySelector('#project-select').value='0'; document.querySelector('#project-select').dispatchEvent(new Event('change',{bubbles:true}))`);
 assert.equal(await evaluate(`document.querySelector('#building-select').options.length`), 2);
@@ -39,6 +39,7 @@ await evaluate(`document.querySelector('[data-action="show-racks"]').click(); do
 await evaluate(`document.querySelector('[data-port-device="s1"][data-port-name="1"]').dispatchEvent(new MouseEvent('click',{bubbles:true,detail:0}))`);
 assert.ok(await evaluate(`[...document.querySelector('#connect-to').options].some(o => o.textContent.includes('Switch two') && o.textContent.includes('Two'))`));
 await evaluate(`{const e=document.querySelector('#connect-to');e.value=[...e.options].find(o=>o.textContent.includes('Switch two') && o.textContent.endsWith('· 1')).value;e.dispatchEvent(new Event('change',{bubbles:true}));}`);
+await evaluate(`document.querySelector('#connect-form').requestSubmit()`);
 assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].cables[0].toPort`), '1');
 await evaluate(`document.querySelector('[data-port-device="s1"][data-port-name="2"]').dispatchEvent(new MouseEvent('click',{bubbles:true,detail:0}))`);
 assert.equal(await evaluate(`[...document.querySelector('#connect-to').options].some(o => o.textContent.includes('Switch two') && o.textContent.endsWith('· 1'))`), false);

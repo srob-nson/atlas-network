@@ -17,6 +17,8 @@ await double('[data-port-device="core"][data-port-name="1"]');
 assert.equal(await evaluate(`document.querySelectorAll('.rack-port.armed').length`),1);
 assert.equal(await evaluate(`!!document.querySelector('#connect-to')`), true);
 await evaluate(`const color=document.querySelector('#connection-color'); color.value='#2368ae'; color.dispatchEvent(new Event('change',{bubbles:true})); const select=document.querySelector('#connect-to'); select.value=[...select.options].find(o => o.textContent.includes('FW-01') && o.textContent.includes('· 1')).value; select.dispatchEvent(new Event('change',{bubbles:true}))`);
+assert.equal(await evaluate(`document.querySelector('#connect-dialog').open`), true);
+await evaluate(`document.querySelector('#connect-form').requestSubmit()`);
 await new Promise(r=>setTimeout(r,100));
 assert.equal(await evaluate(`document.querySelectorAll('#rack-cables path').length`),1);
 assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].cables.filter(c=>c.fromPort==='1' && c.toPort==='1').length`),1);
@@ -38,6 +40,7 @@ assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2
 assert.equal(await evaluate(`document.querySelectorAll('#rack-cables path').length`), 0);
 await double('[data-port-device="core"][data-port-name="2"]');
 await double('[data-port-device="firewall"][data-port-name="2"]');
+await evaluate(`document.querySelector('#connect-form').requestSubmit()`);
 assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].cables.filter(c=>c.fromPort==='2' && c.toPort==='2').length`), 1);
 await double('[data-port-device="core"][data-port-name="2"]');
 assert.equal(await evaluate(`JSON.parse(localStorage.getItem('titan-workspace-v2')).projects[0].cables.filter(c=>c.fromPort==='2' && c.toPort==='2').length`), 0);

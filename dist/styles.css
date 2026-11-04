@@ -69,3 +69,8 @@
 .validation-finding[data-severity="missing"] strong { color: #526e75; }
 .validation-finding p { margin: 4px 0; }
 .validation-link { margin: 4px 14px 2px 0; text-decoration: underline; }
+#question-message { white-space: pre-wrap; }
+#pathway-controls input { width: 65px; margin: 0 4px; }
+.route-choice { display: block; padding: 5px 0; font-size: 12px; }
+#physical-route-form fieldset { border: 1px solid #e1e9e4; margin: 12px 0; padding: 10px; }
+#physical-route-form legend { font-size: 11px; color: #526e5c; }

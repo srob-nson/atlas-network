@@ -186,13 +186,20 @@ export function restoreProject(input) {
     if (['fromPort', 'toPort'].some(key => cable[key] != null && (typeof cable[key] !== 'string' || cable[key].length > 80))) invalid();
     const waypoints = cable.waypoints === undefined ? [] : cable.waypoints;
     if (!Array.isArray(waypoints) || !waypoints.every(p => p && ['x', 'y'].every(k => Number.isFinite(p[k]) && p[k] >= 0 && p[k] <= 100 && p[k] % 5 === 0))) invalid();
-    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), fromPortId: cable.fromPortId || null, toPortId: cable.toPortId || null, label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667' };
+    const route = cable.route ?? { pathwayIds: [], riserIds: [], extraMeters: null, review: null };
+    if (!route || !Array.isArray(route.pathwayIds) || !Array.isArray(route.riserIds) || (route.extraMeters != null && (typeof route.extraMeters !== 'number' || !Number.isFinite(route.extraMeters) || route.extraMeters < 0)) || (route.review != null && (typeof route.review.note !== 'string' || !route.review.note.trim() || route.review.note.length > 1000 || typeof route.review.signature !== 'string'))) invalid();
+    return { id: cable.id, from: cable.from, to: cable.to, waypoints: waypoints.map(({ x, y }) => ({ x, y })), fromPort: String(cable.fromPort || '').slice(0, 80), toPort: String(cable.toPort || '').slice(0, 80), fromPortId: cable.fromPortId || null, toPortId: cable.toPortId || null, label: String(cable.label || '').slice(0, 80), color: /^#[0-9a-f]{6}$/i.test(cable.color) ? cable.color : '#d9a667', route: { pathwayIds: [...route.pathwayIds], riserIds: [...route.riserIds], extraMeters: route.extraMeters ?? null, review: route.review ? { note: route.review.note, signature: route.review.signature } : null } };
   });
   initializePorts(assignedAssets, cables);
   const outline = input.outline === undefined ? [] : input.outline;
   if (!Array.isArray(outline) || (outline.length && outline.length < 3) || outline.length > 200 || !outline.every(p => Array.isArray(p) && p.length === 2 && p.every(n => Number.isFinite(n) && n >= 0 && n <= 100))) invalid();
   const planImage = typeof input.planImage === 'string' && /^data:image\/(png|jpeg|webp);base64,/i.test(input.planImage) ? input.planImage : '';
-  return { name: input.name, outline: outline.map(p => [...p]), floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, zones, assets: assignedAssets, cables };
+  const scale = input.scale ?? null, northDegrees = input.northDegrees ?? null;
+  const layoutRevision = input.layoutRevision ?? 0;
+  if (scale !== null && (!scale || !['widthMeters', 'heightMeters'].every(key => typeof scale[key] === 'number' && Number.isFinite(scale[key]) && scale[key] > 0))) invalid();
+  if (northDegrees !== null && (typeof northDegrees !== 'number' || !Number.isFinite(northDegrees) || northDegrees < 0 || northDegrees >= 360)) invalid();
+  if (!Number.isSafeInteger(layoutRevision) || layoutRevision < 0) invalid();
+  return { name: input.name, outline: outline.map(p => [...p]), floorName: typeof input.floorName === 'string' ? input.floorName : 'Ground floor', planImage, demo: !!input.demo && !planImage, scale: scale && { widthMeters: scale.widthMeters, heightMeters: scale.heightMeters }, northDegrees, layoutRevision, zones, assets: assignedAssets, cables };
 }
 
 export function cableRoute(from, waypoints, to) {
@@ -217,13 +224,14 @@ export function serializeProject(project) {
     return rest;
   }) }));
   const endpoint = (deviceId, portId, name) => ({ deviceId, portId: portId || ports.find(p => p.deviceId === deviceId && p.name.toLowerCase() === (name || '').toLowerCase())?.id || null });
-  const connections = project.cables.map(({ from, to, fromPort, toPort, fromPortId, toPortId, ...cable }) => ({ ...cable, from: endpoint(from, fromPortId, fromPort), to: endpoint(to, toPortId, toPort) }));
-  return { schemaVersion: 3, name: project.name, buildings, devices, racks, ports, connections };
+  const connections = project.cables.map(({ from, to, fromPort, toPort, fromPortId, toPortId, route, ...cable }) => ({ ...cable, from: endpoint(from, fromPortId, fromPort), to: endpoint(to, toPortId, toPort), route: route ?? { pathwayIds: [], riserIds: [], extraMeters: null, review: null } }));
+  return { schemaVersion: 4, name: project.name, buildings, devices, racks, ports, connections, pathways: project.pathways || [], risers: project.risers || [] };
 }
 
 function restoreEntities(input) {
   const invalid = () => { throw new Error('Invalid project file.'); };
   if (![input.buildings, input.devices, input.racks, input.ports, input.connections].every(Array.isArray)) invalid();
+  if (input.schemaVersion === 4 && (!Array.isArray(input.pathways) || !Array.isArray(input.risers) || input.connections.some(connection => !connection?.route))) invalid();
   const entities = [...input.devices, ...input.racks];
   if (input.devices.some(a => a.type === 'cabinet') || input.racks.some(a => a.type !== 'cabinet')) invalid();
   if (new Set(entities.map(a => a.id)).size !== entities.length) invalid();
@@ -254,12 +262,12 @@ function restoreEntities(input) {
     const a = endpoint(from), b = endpoint(to);
     return { ...cable, from: a.device, to: b.device, fromPort: a.name, toPort: b.name, fromPortId: a.id, toPortId: b.id };
   });
-  return { schemaVersion: 1, name: input.name, buildings, cables: connections };
+  return { schemaVersion: 1, name: input.name, buildings, cables: connections, pathways: input.pathways ?? [], risers: input.risers ?? [] };
 }
 
 export function restoreHierarchy(input) {
   const invalid = () => { throw new Error('Invalid project file.'); };
-  if (input?.schemaVersion === 2 || input?.schemaVersion === 3) input = restoreEntities(input);
+  if ([2, 3, 4].includes(input?.schemaVersion)) input = restoreEntities(input);
   if (input?.schemaVersion !== undefined && input.schemaVersion !== 1) throw new Error('Unsupported project schema version.');
   if (!input?.buildings) {
     const legacy = restoreProject(input);
@@ -296,7 +304,20 @@ export function restoreHierarchy(input) {
     const portId = cable[`${side}PortId`];
     if (portId && !assets.find(asset => asset.id === cable[side])?.ports.some(port => port.id === portId && (!cable[`${side}Port`] || port.name.toLowerCase() === cable[`${side}Port`].toLowerCase()))) invalid();
   }
-  return { schemaVersion: 1, name: input.name, buildings, cables };
+  const pathways = input.pathways ?? [], risers = input.risers ?? [];
+  const validPoint = point => point && ['x', 'y'].every(key => typeof point[key] === 'number' && Number.isFinite(point[key]) && point[key] >= 0 && point[key] <= 100);
+  if (!Array.isArray(pathways) || !Array.isArray(risers)) invalid();
+  const pathIds = new Set(), riserIds = new Set();
+  for (const path of pathways) {
+    if (!path || typeof path.id !== 'string' || !path.id || pathIds.has(path.id) || typeof path.name !== 'string' || !path.name.trim() || path.name.length > 80 || !floorIds.has(path.floorId) || !Array.isArray(path.points) || path.points.length < 2 || path.points.length > 200 || !path.points.every(validPoint)) invalid();
+    pathIds.add(path.id);
+  }
+  for (const riser of risers) {
+    if (!riser || typeof riser.id !== 'string' || !riser.id || riserIds.has(riser.id) || typeof riser.name !== 'string' || !riser.name.trim() || riser.name.length > 80 || !riser.from || !riser.to || !floorIds.has(riser.from.floorId) || !floorIds.has(riser.to.floorId) || riser.from.floorId === riser.to.floorId || !validPoint(riser.from) || !validPoint(riser.to) || (riser.lengthMeters != null && (typeof riser.lengthMeters !== 'number' || !Number.isFinite(riser.lengthMeters) || riser.lengthMeters < 0))) invalid();
+    riserIds.add(riser.id);
+  }
+  for (const cable of cables) if (new Set(cable.route.pathwayIds).size !== cable.route.pathwayIds.length || new Set(cable.route.riserIds).size !== cable.route.riserIds.length || cable.route.pathwayIds.some(id => !pathIds.has(id)) || cable.route.riserIds.some(id => !riserIds.has(id))) invalid();
+  return { schemaVersion: 1, name: input.name, buildings, cables, pathways: structuredClone(pathways), risers: structuredClone(risers) };
 }
 
 export function moveAssetToFloor(source, target, asset, cables) {
